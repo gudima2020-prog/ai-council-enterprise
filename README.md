@@ -57,6 +57,14 @@ install.bat
 run.bat
 ```
 
+## Что запускать
+
+Основной файл:
+
+```powershell
+python main.py
+```
+
 ## Важно
 
 Не публикуйте настоящий `.env` и API-ключи в GitHub или чатах.
