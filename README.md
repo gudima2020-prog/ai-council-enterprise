@@ -31,6 +31,7 @@
 ```powershell
 cd C:\ai_council_enterprise
 git clone https://github.com/gudima2020-prog/ai-council-enterprise.git .
+git checkout v0.1-bootstrap
 .\install.ps1
 notepad .env
 .\run.ps1
