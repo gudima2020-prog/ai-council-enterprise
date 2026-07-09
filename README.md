@@ -1,6 +1,6 @@
 # AI Council Enterprise
 
-Универсальное настольное приложение для работы с несколькими ИИ-моделями через OpenRouter.
+Универсальное приложение для работы с несколькими ИИ-моделями через OpenRouter.
 
 ## Цель проекта
 
@@ -17,31 +17,52 @@
 
 `v0.1` — базовый каркас проекта.
 
-В этой версии закладываются:
+В этой версии есть:
 
 - структура проекта;
 - безопасная работа с `.env`;
 - подключение OpenRouter;
-- консольный тестовый запуск;
-- подготовка к графическому интерфейсу.
+- консольный запуск;
+- сохранение логов;
+- установочные скрипты для Windows.
 
 ## Быстрый запуск на Windows
 
 ```powershell
 cd C:\ai_council_enterprise
 git clone https://github.com/gudima2020-prog/ai-council-enterprise.git .
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-copy .env.example .env
+git checkout v0.1-bootstrap
+.\install.ps1
 notepad .env
-python main.py
+.\run.ps1
 ```
 
 В файл `.env` нужно вставить ключ OpenRouter:
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxx
+OPENROUTER_DEFAULT_MODEL=deepseek/deepseek-chat-v3-0324
+```
+
+Если PowerShell запрещает запуск скриптов:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Можно использовать BAT-файлы:
+
+```cmd
+install.bat
+run.bat
+```
+
+## Что запускать
+
+Основной файл:
+
+```powershell
+python main.py
 ```
 
 ## Важно
