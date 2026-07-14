@@ -1,0 +1,13 @@
+{
+  "app_name": "AI Studio Enterprise",
+  "app_version": "0.5.0",
+  "environment": "development",
+  "debug": true,
+  "host": "127.0.0.1",
+  "port": 8000,
+  "default_provider": "openrouter",
+  "default_model": "deepseek/deepseek-chat-v3-0324",
+  "max_tokens": 1000,
+  "temperature": 0.4,
+  "request_timeout_seconds": 60
+}

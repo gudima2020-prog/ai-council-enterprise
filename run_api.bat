@@ -1,0 +1,8 @@
+@echo off
+if not exist .venv (
+  echo Virtual environment not found. Run install.bat first.
+  pause
+  exit /b 1
+)
+.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+pause

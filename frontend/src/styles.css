@@ -1,0 +1,160 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 280px;
+  background: #111827;
+  color: white;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.logo {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.version {
+  color: #a5b4fc;
+  margin-top: 4px;
+  margin-bottom: 30px;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav button {
+  text-align: left;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.nav button.active,
+.nav button:hover {
+  background: #4f46e5;
+  color: white;
+}
+
+.hint {
+  margin-top: auto;
+  color: #9ca3af;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  gap: 16px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.topbar h1 {
+  margin: 0;
+}
+
+.topbar p {
+  margin: 4px 0 0 0;
+  color: #6b7280;
+}
+
+select {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: white;
+}
+
+.chat {
+  flex: 1;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.message {
+  max-width: 900px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: 14px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.message.user {
+  margin-left: auto;
+  background: #eef2ff;
+}
+
+.message.assistant {
+  background: #f9fafb;
+}
+
+.message.system {
+  background: #ecfeff;
+  color: #155e75;
+}
+
+.role {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.composer {
+  display: flex;
+  gap: 12px;
+}
+
+.composer textarea {
+  flex: 1;
+  height: 110px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid #d1d5db;
+  resize: none;
+  font-size: 15px;
+}
+
+.composer button {
+  width: 150px;
+  border: 0;
+  border-radius: 14px;
+  background: #4f46e5;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.composer button:disabled {
+  background: #9ca3af;
+}

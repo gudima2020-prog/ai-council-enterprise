@@ -21,5 +21,15 @@ class OpenRouterProvider(AIProvider):
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.4,
+            max_tokens=1000,
         )
-        return response.choices[0].message.content or ""
+
+        if not response.choices:
+            return "Пустой ответ от OpenRouter."
+
+        message = response.choices[0].message
+
+        if message is None:
+            return "OpenRouter не вернул сообщение."
+
+        return message.content or "Пустой текст ответа."
