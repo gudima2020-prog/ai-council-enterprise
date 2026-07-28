@@ -1,0 +1,18 @@
+P1-020.1 — Secret Management Foundation
+
+Apply over C:\Projects\ai-council-enterprise
+
+Commands:
+  .\db_upgrade.bat
+  .\run_tests.bat
+  .\db_current.bat
+
+Expected Alembic head:
+  20260716_0041
+
+Security notes:
+- HTTP API never returns secret plaintext.
+- Windows local vault values are encrypted with DPAPI.
+- Environment provider stores only variable references.
+- External provider adapters are registered programmatically.
+- Provider config must not contain credentials or tokens.

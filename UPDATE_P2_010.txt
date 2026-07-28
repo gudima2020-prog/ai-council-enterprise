@@ -1,0 +1,11 @@
+AI Studio Enterprise v0.14.0 / P2-010 Docker Isolated Runtime
+
+1. Stop AI Studio.
+2. Extract UPDATE over the existing v0.13.0 project.
+3. Activate .venv.
+4. Run: python -m alembic upgrade head
+5. Expected head: 20260724_0052
+6. Run: verify_p2_010.bat
+7. Optional but recommended for isolated pytest/build: prepare_p2_010_runtime.bat
+
+P2-010 keeps Docker optional. Without Docker, AI Studio continues to run and trusted host verification remains available under the existing P2-007 policy.

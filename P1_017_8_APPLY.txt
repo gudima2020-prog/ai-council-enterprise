@@ -1,0 +1,19 @@
+P1-017.8 — Execution Supervisor Agent
+
+Этот архив является накопительным обновлением поверх P1-017.6.1 и включает
+компоненты P1-017.7 Critic/Reviewer Loop.
+
+Распаковать поверх:
+C:\Projects\ai-council-enterprise
+
+Затем выполнить:
+.\run_tests.bat
+.\db_current.bat
+
+Ожидаемый Alembic head:
+20260715_0017
+
+Безопасность:
+Глобальная политика Supervisor по умолчанию только регистрирует инциденты.
+Автоматические cancel/replan отключены до явного включения
+automatic_actions_enabled.

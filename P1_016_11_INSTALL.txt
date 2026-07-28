@@ -1,0 +1,6 @@
+P1-016.11 — Budgets, Quotas and Admission Policy
+
+1. Распаковать архив поверх C:\Projects\ai-council-enterprise
+2. Запустить .\run_tests.bat
+3. Проверить .\db_current.bat
+4. Ожидаемая Alembic revision: 20260715_0008

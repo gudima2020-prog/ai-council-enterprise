@@ -30,6 +30,10 @@ def normalize_provider_error(
         code = "RATE_LIMIT"
         message = "Провайдер временно ограничил частоту запросов."
         recoverable = True
+    elif any(token in lowered for token in ("500", "502", "503", "504", "server error", "service unavailable")):
+        code = "SERVER_ERROR"
+        message = "Провайдер временно недоступен из-за серверной ошибки."
+        recoverable = True
     elif "timeout" in lowered or "timed out" in lowered:
         code = "TIMEOUT"
         message = "Провайдер не ответил вовремя."

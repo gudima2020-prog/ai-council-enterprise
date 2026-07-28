@@ -121,7 +121,7 @@ OPENROUTER_API_KEY=sk-or-v1-...
 Пример:
 
 ```text
-sk-or-v1-abc123456789
+sk-or-v1-<redacted>
 ```
 
 должен отображаться как:

@@ -1,0 +1,20 @@
+P1-018.9 — Mission Outcome Forecasting, Scenarios and What-if Simulation
+
+Apply:
+1. Extract this archive over C:\Projects\ai-council-enterprise
+2. Run:
+   .\db_upgrade.bat
+   .\run_tests.bat
+   .\db_current.bat
+
+Expected Alembic head:
+20260716_0029
+
+No new external Python dependency is required.
+
+Safety defaults:
+- forecasting disabled
+- manual mode
+- automatic refresh disabled
+- human approval required for scenario selection policy
+- simulations are advisory and do not apply changes

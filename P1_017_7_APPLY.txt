@@ -1,0 +1,6 @@
+P1-017.7 — Critic/Reviewer Loop
+
+1. Распаковать архив поверх C:\\Projects\\ai-council-enterprise
+2. Запустить .\\run_tests.bat
+3. Проверить .\\db_current.bat
+4. Ожидаемый Alembic head: 20260715_0016

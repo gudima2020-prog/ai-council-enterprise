@@ -1,0 +1,11 @@
+P1-019.8 — Immutable Operator Journal, Compliance and Access Review
+
+Apply over AI Studio Enterprise P1-019.7:
+1. Extract into C:\Projects\ai-council-enterprise
+2. Run:
+   .\db_upgrade.bat
+   .\run_tests.bat
+   .\db_current.bat
+
+Expected Alembic head:
+20260716_0038

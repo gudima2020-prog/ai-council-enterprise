@@ -383,46 +383,64 @@ Source type:
 
 ## 13. AI Council
 
-### council_sessions
+Таблицы реализованы в revision `20260716_0044`; revision `20260724_0045`
+добавляет допустимый статус `cancelled`.
+
+### council_runs
 
 Поля:
 
 - id;
-- project_id;
 - workspace_id;
+- replay_of_run_id;
 - question;
+- mode;
 - status;
-- created_at;
-- updated_at;
-- metadata_json.
-
-### council_responses
-
-Поля:
-
-- id;
-- council_session_id;
-- model_id;
-- role_name;
-- response_text;
-- confidence;
-- status;
-- error_message;
-- created_at;
-- metadata_json.
-
-### council_consensus
-
-Поля:
-
-- id;
-- council_session_id;
+- synthesizer provider/model;
+- synthesis provider/model/status;
 - final_answer;
-- agreement_score;
-- confidence_score;
-- judge_model_id;
+- consensus_json;
+- disagreements_json;
+- recommendations_json;
+- confidence;
+- member_count;
+- successful_member_count;
+- duration_ms;
+- correlation_id;
+- actor_id;
+- error_code;
+- error_message;
+- started_at;
+- finished_at;
 - created_at;
 - metadata_json.
+
+### council_run_members
+
+Поля:
+
+- id;
+- run_id;
+- ordinal;
+- provider;
+- model;
+- requested_model;
+- role;
+- label;
+- status;
+- fallback_used;
+- fallback_model;
+- answer;
+- error_code;
+- error_message;
+- latency_ms;
+- input_tokens;
+- output_tokens;
+- total_tokens;
+- created_at;
+
+Политика retention хранится в общей таблице `settings` с ключом
+`council.history.retention`.
 
 ---
 

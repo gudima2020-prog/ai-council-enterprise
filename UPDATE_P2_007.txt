@@ -1,0 +1,15 @@
+AI Studio Enterprise v0.11.0 — P2-007 Code Sandbox & Verifiable Patches
+
+1. Stop AI Studio.
+2. Extract this UPDATE over C:\Projects\ai-council-enterprise with replacement.
+3. Activate .venv.
+4. Run: python -m alembic upgrade head
+5. Expected head: 20260724_0049
+6. Run: verify_p2_007.bat
+7. Start: start_studio.bat
+
+P2-007 adds Git worktree isolation, patch fingerprints, risk classification,
+verification profiles, protected/blocked paths and one-time Human Approval.
+Existing .env, SQLite data, .venv and frontend/node_modules are not included in UPDATE.
+
+Security defaults: only explicitly allowed Git roots can be opened; host pytest/npm execution remains OFF unless AI_STUDIO_CODE_SANDBOX_ALLOW_TEST_EXECUTION=1.

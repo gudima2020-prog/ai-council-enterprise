@@ -22,7 +22,7 @@ def make_settings() -> AppSettings:
         port=8000,
         openrouter_api_key="",
         default_provider="openrouter",
-        default_model="deepseek/deepseek-chat-v3-0324",
+        default_model="openrouter/free",
         max_tokens=1000,
         temperature=0.4,
         request_timeout_seconds=60,
@@ -55,7 +55,7 @@ async def test_workspace_policy_update_and_reset() -> None:
         updated = await service.update_policy(
             workspace_id=workspace.id,
             values={
-                "ai.model": "qwen/qwen3-30b-a3b",
+                "ai.model": "openai/gpt-oss-20b:free",
                 "ai.temperature": 0.2,
                 "ai.max_tokens": 2000,
                 "memory.mode": "workspace",
@@ -64,7 +64,7 @@ async def test_workspace_policy_update_and_reset() -> None:
         )
         session.commit()
 
-        assert updated.model == "qwen/qwen3-30b-a3b"
+        assert updated.model == "openai/gpt-oss-20b:free"
         assert updated.temperature == 0.2
         assert service.is_plugin_allowed(
             workspace_id=workspace.id,

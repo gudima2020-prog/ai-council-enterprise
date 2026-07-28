@@ -1,0 +1,24 @@
+P1-019.2 — Human Control Governance
+
+Install over the current AI Studio Enterprise project:
+  C:\Projects\ai-council-enterprise
+
+Commands:
+  .\db_upgrade.bat
+  .\run_tests.bat
+  .\db_current.bat
+
+Expected Alembic head:
+  20260716_0032
+
+New tables:
+  human_control_roles
+  human_control_role_bindings
+  human_control_approval_policies
+  human_control_approval_cases
+  human_control_approval_steps
+  human_control_approval_votes
+  human_control_escalations
+
+The archive is cumulative and includes all components required by the current
+P1-019 backend line.

@@ -1,0 +1,19 @@
+P1-019.4.1 — Circular import fix
+
+Cause:
+backend.core.container imports backend.control_center.service. Python first
+executes backend.control_center.__init__, which eagerly imported security.py.
+security.py imported backend.api.dependencies, and dependencies imported the
+partially initialised AppContainer, producing a circular import.
+
+Fix:
+backend.control_center public exports are now lazy. Importing service/auth/
+governance no longer imports route security during AppContainer initialisation.
+
+Database migration:
+Not required. Alembic head remains 20260716_0034.
+
+Apply:
+1. Extract over C:\Projects\ai-council-enterprise
+2. Run .\run_tests.bat
+3. Run .\db_current.bat

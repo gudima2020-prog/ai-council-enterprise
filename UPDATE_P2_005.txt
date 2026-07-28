@@ -1,0 +1,16 @@
+AI Studio Enterprise v0.9.0 / P2-005
+Actual Cost Ledger, Quotas & Budget-Aware Routing
+
+1. Сделайте резервную копию проекта и data/ai_studio.db.
+2. Распакуйте UPDATE поверх текущей v0.8.0 / P2-004.
+3. Не заменяйте свой .env.
+4. Активируйте .venv.
+5. Выполните:
+
+   python -m alembic upgrade head
+   python -m alembic current
+   verify_p2_005.bat
+
+Ожидаемый Alembic head: 20260724_0047
+
+UPDATE не содержит .env, рабочую SQLite-базу, .venv или frontend/node_modules.

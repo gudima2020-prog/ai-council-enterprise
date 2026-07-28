@@ -1,0 +1,16 @@
+P1-019.3 — Authenticated Operator Identities, Sessions, API Tokens and Break-glass
+
+Apply over C:\Projects\ai-council-enterprise
+
+Commands:
+  .\db_upgrade.bat
+  .\run_tests.bat
+  .\db_current.bat
+
+Expected Alembic head:
+  20260716_0033
+
+Important:
+- Existing operator APIs remain in compatibility mode.
+- Bootstrap the first authenticated owner before enabling future enforcement.
+- Session, API-token and break-glass secrets are displayed only once.

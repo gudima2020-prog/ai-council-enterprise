@@ -1,0 +1,12 @@
+P1-017.3 — Agent Runtime and Orchestration Loop
+
+1. Extract this archive over:
+   C:\Projects\ai-council-enterprise
+
+2. Run:
+   cd C:\Projects\ai-council-enterprise
+   .\run_tests.bat
+   .\db_current.bat
+
+3. Expected Alembic head:
+   20260715_0012

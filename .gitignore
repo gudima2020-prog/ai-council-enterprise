@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+*.env
+!.env.example
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+
+# Runtime state
+data/
+logs/
+diagnostics/
+*.db
+*.db-shm
+*.db-wal
+
+# Build and editor artifacts
+build/
+dist/
+*.zip
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.env.local
+.env.*.local
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*.db-*
+*.log
+runtime/artifacts/
+runtime/runs/
+crypto_ai_trader_enterprise_*/

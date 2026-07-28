@@ -1,0 +1,13 @@
+P1-018.7 — Mission Dependencies and Portfolio Coordination
+
+Apply over:
+C:\Projects\ai-council-enterprise
+
+Commands:
+  .\run_tests.bat
+  .\db_current.bat
+
+Expected Alembic head:
+20260716_0027
+
+This archive is cumulative and includes the P1-018.6.1 Windows timezone fix.

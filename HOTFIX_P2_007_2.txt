@@ -1,0 +1,13 @@
+AI Studio Enterprise v0.11.2 — P2-007.2 Windows Git Config Scope Hotfix
+
+Fixes false Code Sandbox rejection on Windows when Git for Windows / Git LFS
+defines filter.* drivers in global/system configuration.
+
+Security behavior:
+- global/system filters no longer block otherwise-clean repositories;
+- local/worktree clean/smudge/process filters remain blocked;
+- core.fsmonitor is forced off for every sandbox Git command;
+- Unicode-safe Git I/O from P2-007.1 is preserved.
+
+Alembic head remains: 20260724_0049
+Expected verify_p2_007.bat backend result: 67 passed

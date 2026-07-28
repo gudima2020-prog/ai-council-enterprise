@@ -1,0 +1,25 @@
+P1-020.3 — External Secret Providers, Rotation Lifecycle and Health Monitoring
+
+Apply over AI Studio Enterprise P1-020.2 or any cumulative P1-020 archive.
+
+1. Extract over:
+   C:\Projects\ai-council-enterprise
+2. Run:
+   .\db_upgrade.bat
+   .\run_tests.bat
+   .\db_current.bat
+
+Expected Alembic head:
+20260716_0043
+
+Optional provider SDKs:
+.\install_secret_provider_sdks.bat
+
+HashiCorp Vault KV v2 uses no extra Python dependency. Configure its address,
+mount and auth_env; the Vault token itself stays in the named environment
+variable and is not persisted in provider config.
+
+Automatic managed_random rotation is disabled unless a rotation policy explicitly
+enables it. It is intended only for system-owned secret material whose backing
+provider can safely accept a new random value. Third-party API credentials should
+remain monitor_only or use a registered external_handler.

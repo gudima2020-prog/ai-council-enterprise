@@ -1,0 +1,19 @@
+P1-019.7 — On-call Routing and Notification Escalations
+
+Apply over:
+C:\Projects\ai-council-enterprise
+
+Commands:
+  .\db_upgrade.bat
+  .\run_tests.bat
+  .\db_current.bat
+
+Expected Alembic head:
+20260716_0037
+
+New environment setting:
+  AI_STUDIO_HUMAN_CONTROL_ROUTING_SECONDS=15
+
+Safe default:
+  No routing or escalation rule is enabled automatically. Existing P1-019.6
+  subscription routing remains unchanged until rules are configured.

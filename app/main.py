@@ -9,7 +9,7 @@ def main() -> None:
     council = CouncilOrchestrator(provider=provider, settings=settings)
 
     print("=" * 70)
-    print("AI Council Enterprise v0.1")
+    print("AI Studio Enterprise v0.8.0 — legacy console chat")
     print("Команды: выход / exit / quit")
     print("=" * 70)
 

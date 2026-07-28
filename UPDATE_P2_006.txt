@@ -1,0 +1,16 @@
+AI Studio Enterprise v0.10.0 / P2-006
+Advanced Council Orchestration
+
+Update target:
+  an existing v0.9.0 / P2-005 installation.
+
+After extracting this UPDATE over the project directory:
+  1. Activate the existing virtual environment.
+  2. Run: python -m alembic upgrade head
+  3. Run: python -m alembic current
+     Expected: 20260724_0048 (head)
+  4. Run: verify_p2_006.bat
+  5. Start normally with start_studio.bat
+
+The update does not contain .env, runtime SQLite databases, .venv, node_modules
+or logs.

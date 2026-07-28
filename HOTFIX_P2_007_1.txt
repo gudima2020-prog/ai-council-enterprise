@@ -1,0 +1,6 @@
+AI Studio Enterprise v0.11.1 — P2-007.1 Windows Unicode Git I/O Hotfix
+
+Исправляет Code Sandbox на Windows, когда путь к репозиторию/временному каталогу содержит кириллицу или другие non-ASCII символы.
+Alembic migration не требуется; head остаётся 20260724_0049.
+После распаковки поверх v0.11.0 запустите verify_p2_007.bat.
+Ожидается 65 passed и успешный frontend production build.

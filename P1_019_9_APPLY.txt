@@ -1,0 +1,21 @@
+P1-019.9 — Retention, Legal Hold and Evidence Archives
+
+Apply over AI Studio Enterprise P1-019.8:
+1. Extract into C:\Projects\ai-council-enterprise
+2. Run:
+   .\db_upgrade.bat
+   .\run_tests.bat
+   .\db_current.bat
+
+Expected Alembic head:
+20260716_0039
+
+Safety defaults:
+- retention policy disabled;
+- enforcement_mode=observe;
+- destructive purge requires an enabled purge policy;
+- require_human_approval=true blocks purge unless the caller uses the
+  explicitly audited force path after approval;
+- active legal holds always override deletion;
+- operator audit events and compliance reports are never physically deleted;
+- evidence archives and external-auditor packages are hash sealed.

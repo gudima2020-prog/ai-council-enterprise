@@ -1,19 +1,43 @@
 # TODO
 
-## v0.2
+## P2-002 — Council Run Persistence & History
 
-- добавить файл `models.txt`;
-- добавить выбор режима работы;
-- добавить обработку типовых ошибок OpenRouter;
-- добавить команду проверки модели;
-- добавить режим крипто-аналитика.
+- [x] Добавить Alembic revision `20260716_0044`.
+- [x] Создать нормализованные таблицы `council_runs` и
+  `council_run_members`.
+- [x] Сохранять completion/failure и частичные результаты атомарно.
+- [x] Добавить API списка, карточки, удаления и повторного запуска.
+- [x] Добавить историю и фильтры Workspace в React UI.
+- [x] Добавить retention policy для текстов и token usage.
 
-## v0.3
+## P2-003 — Live Progress & Streaming
 
-- добавить настоящий режим Совета ИИ;
-- отправлять один запрос нескольким моделям;
-- формировать итоговый вывод.
+- [x] SSE-прогресс участников с буфером и переподключением.
+- [x] Потоковая выдача итогового синтеза.
+- [x] Отмена запуска и timeout на участника.
+- [x] Повтор только неуспешных участников.
 
-## v0.4
+## P2-004 — Council Presets & Cost Control
 
-- добавить графический интерфейс.
+- [x] Сохраняемые составы и роли.
+- [x] Лимит токенов и ориентировочная стоимость до запуска.
+- [x] Бюджеты Workspace и approval для дорогих/неизвестных запусков.
+- [x] Выбор отдельной модели-председателя.
+- [x] Cost gate для replay и retry failed.
+
+## P2-005 — Production Hardening & Routing
+
+- [ ] Actual-cost settlement по фактическому token usage.
+- [ ] Budget-aware routing и provider quotas.
+- [ ] API authentication для пользовательских маршрутов.
+- [ ] Rate limiting и request size policy.
+- [ ] Provider/model catalog refresh с безопасным diff.
+- [ ] Packaging desktop runtime и Tauri shell.
+
+## Позже
+
+- Documents/PDF/OCR;
+- Research и Browser;
+- Crypto AI;
+- Code Workspace;
+- визуальный Plugin Manager.

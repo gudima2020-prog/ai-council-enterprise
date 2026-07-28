@@ -1,0 +1,16 @@
+AI Studio Enterprise v0.10.1 / P2-006.1
+Cancellation Barrier Hotfix
+
+Target:
+  existing v0.10.0 / P2-006 installation.
+
+Fix:
+  closes the cancellation race between progress callbacks and the next provider call.
+  A cancel raised after reviewer.completed preserves paid draft/reviewer stages and
+  prevents council_review_revision from being sent.
+
+Database:
+  no schema change. Alembic head remains 20260724_0048.
+
+Install:
+  extract this HOTFIX over the project directory and run verify_p2_006.bat.

@@ -1,4 +1,6 @@
 @echo off
+setlocal
+cd /d "%~dp0"
 if not exist .venv (
   echo Virtual environment not found. Run install.bat first.
   pause

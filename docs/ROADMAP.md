@@ -1,149 +1,144 @@
-# ROADMAP.md
-
 # AI Studio Enterprise — Roadmap
 
-Версия: 0.1
-Статус: Draft
+Версия плана: **0.14.0**
+Дата обновления: **2026-07-24**
 
-## PHASE 0 — Проектирование
-- ✅ P0-001 Vision
-- ✅ P0-002 Requirements
-- ✅ P0-003 Architecture
-- 🔄 P0-004 Roadmap
-- ⏳ P0-005 Database Design
-- ⏳ P0-006 Plugin SDK
-- ⏳ P0-007 Security Design
+## Phase 1 — Enterprise Core
 
-Критерий завершения:
-- Утверждена документация ядра.
+Статус: **завершён до P1-020.3**.
 
----
+- Core, Workspace, repositories, memory и model catalog;
+- Task Engine и Orchestration Engine;
+- Autonomous Missions;
+- Human Control Center;
+- Secret Management и внешние Secret Providers;
+- Alembic head `20260724_0052`.
 
-## PHASE 1 — Core
+## Phase 2 — Product Modules
 
-Цель: построить фундамент платформы.
+### P2-001 — AI Council
 
-### P1-001 Configuration
-- Settings
-- .env
-- config loader
+Статус: **реализован в v0.6.0**.
 
-### P1-002 Logging
+- multi-model execution;
+- structured consensus;
+- confidence score;
+- comparison UI;
+- partial failure handling;
+- one-shot free-model fallback и resilient synthesis parser.
 
-### P1-003 Event Bus
+### P2-002 — Council History
 
-### P1-004 AI Gateway
+Статус: **реализован в v0.6.1**.
 
-### P1-005 Model Manager
+- persistence завершённых, частичных и неуспешных запусков;
+- изолированная Workspace history с фильтрами;
+- просмотр сохранённого отчёта, replay и удаление;
+- retention policy для текстов, token usage и очистки.
 
-### P1-006 Prompt Manager
+### P2-003 — Live Council
 
-### P1-007 Repository Layer
+Статус: **реализован в v0.7.0**.
 
-Результат:
-Рабочее ядро без бизнес-модулей.
+- SSE streaming с возобновлением по `Last-Event-ID`;
+- живой progress участников и потоковый синтез;
+- cancellation и настраиваемый timeout участника;
+- retry только неуспешных участников с повторным использованием сохранённых
+  успешных ответов.
 
----
+### P2-004 — Presets and Cost Control
 
-## PHASE 2 — Backend API
+Статус: **реализован в v0.8.0**.
 
-- Chat API
-- Council API
-- Projects API
-- Memory API
-- Plugin API
-- Health API
+- reusable Council presets с явными ролями;
+- отдельная модель-председатель;
+- server-side cost preflight;
+- Workspace budgets, soft/hard limits и approval gates;
+- one-time fingerprint-bound approvals для дорогой/неизвестной стоимости.
 
-Результат:
-Полностью документированный REST API.
+### P2-005 — Actual Cost Ledger & Budget-Aware Routing
 
----
+Статус: **реализован в v0.9.0**.
 
-## PHASE 3 — Frontend
+- фактический cost ledger по каждому member/synthesis;
+- provider-reported cost с безопасным calculated fallback;
+- reservations для защиты бюджета от параллельного oversubscription;
+- monthly run/token quotas и admission rate limit;
+- Workspace usage API: actual / committed / reserved;
+- advisory budget-aware routing без скрытой замены моделей;
+- UI фактических расходов и ручного применения экономичного состава.
 
-- App Shell
-- Sidebar
-- Workspace
-- Chat UI
-- Settings
-- Project selector
+### P2-006 — Advanced Council Orchestration
 
-Результат:
-Рабочий React-интерфейс.
+Статус: **реализован в v0.10.0**.
 
----
+- Solo / Council / Best-of-N / Review / Arbitration / Delegate;
+- независимый Reviewer и отдельный Arbiter;
+- bounded delegation: максимум 8 субагентов, глубина строго 1;
+- orchestration trace в истории и Live SSE;
+- общие P2-005 budget/preflight/ledger для всех дополнительных стадий.
 
-## PHASE 4 — Memory
+### P2-007 — Code Sandbox
 
-- Session Memory
-- Workspace Memory
-- Project Memory
-- Global Memory
-- Search
+- Git worktree isolation для параллельных агентов;
+- проверяемые patch-наборы;
+- protected paths и Human Approval перед применением;
+- CI/test evidence перед merge/apply.
 
----
+### P2-008 — Council-to-Sandbox Agent Execution
 
-## PHASE 5 — AI Council
+Статус: **реализован в v0.12.0**.
 
-- Multi-model execution
-- Consensus
-- Confidence score
-- Comparison view
+- handoff final Council decision в Code Sandbox;
+- capability-limited coding agent без shell/network/secrets;
+- explicit context и exact writable-path allowlist;
+- structured full-file edits с schema/path/size/TOCTOU validation;
+- автоматические Inspect/Verification, но никогда automatic Apply;
+- audit usage/cost и operation metadata.
 
----
+### P2-009 — Multi-Provider Model Gateway
 
-## PHASE 6 — Documents
+Статус: **реализован в v0.13.0**.
 
-- PDF
-- DOCX
-- OCR
-- Search
-- Summaries
+- универсальный OpenAI-compatible provider adapter;
+- SVRTR/SaveRouter как дополнительный, но не единственный provider;
+- provider health checks, failover и circuit-breaker;
+- capability registry (text/vision/tools/context limits);
+- routing по качеству, стоимости, latency и reliability;
+- Workspace trust policy для чувствительных данных.
 
----
 
-## PHASE 7 — Crypto Platform
+### P2-010 — Isolated Runtime / Container Execution Boundary
 
-- Exchange adapters
-- Market collector
-- Indicators
-- AI analysis
-- Strategy layer
-- Risk layer
+Статус: **реализован в v0.14.0**.
 
----
+- Docker process/CPU/RAM/PID/time limits для недоверенного выполнения;
+- `network=none`, read-only root/source и capability drop;
+- disposable tmpfs execution environment для pytest/build;
+- evidence/artifact collection без writable host mount.
 
-## PHASE 8 — Agents
 
-- Chief Agent
-- Crypto Agent
-- Research Agent
-- Code Agent
-- Document Agent
+## Phase 3 — Additional Workspaces
 
----
+- Documents: PDF, DOCX, OCR, summaries;
+- Research: sources, citations, reports;
+- Browser: controlled sessions and evidence;
+- Code: repository-aware assistance;
+- Crypto AI: market data, strategies and risk.
 
-## PHASE 9 — Plugin SDK
+## Phase 4 — Desktop and Release 1.0
 
-- Plugin Loader
-- SDK
-- Plugin Manager
+- Tauri desktop shell;
+- installer and signed builds;
+- backup/restore and update channel;
+- end-to-end security review;
+- operator and user documentation.
 
----
+## Release 1.0 criteria
 
-## PHASE 10 — Release 1.0
-
-Обязательные критерии:
-- Core
-- Backend
-- Frontend
-- AI Gateway
-- Chat
-- AI Council
-- Memory v1
-- Документация
-- Desktop (Tauri)
-
-## Правило проекта
-
-Следующая задача начинается только после завершения предыдущей.
+- stable Core and migration policy;
+- Chat and AI Council with persistence;
+- Memory v1;
+- at least one document/research workflow;
+- authenticated local UI;
+- reproducible Windows packaging.

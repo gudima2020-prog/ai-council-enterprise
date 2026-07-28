@@ -118,7 +118,7 @@ gateway.complete(
         {"role": "system", "content": "..."},
         {"role": "user", "content": "..."}
     ],
-    model="deepseek/deepseek-chat-v3-0324",
+    model="openrouter/free",
     provider="openrouter",
     temperature=0.4,
     max_tokens=1000,
@@ -140,7 +140,7 @@ gateway.complete(
   "source": "chat",
   "mode": "universal",
   "provider": "openrouter",
-  "model": "deepseek/deepseek-chat-v3-0324",
+  "model": "openrouter/free",
   "messages": [],
   "temperature": 0.4,
   "max_tokens": 1000,
@@ -159,7 +159,7 @@ gateway.complete(
 {
   "request_id": "req_123",
   "provider": "openrouter",
-  "model": "deepseek/deepseek-chat-v3-0324",
+  "model": "openrouter/free",
   "content": "Ответ модели",
   "status": "success",
   "usage": {
@@ -232,10 +232,10 @@ Model Manager отвечает за:
 
 ```json
 {
-  "default_model": "deepseek/deepseek-chat-v3-0324",
+  "default_model": "openrouter/free",
   "fallback_models": [
-    "qwen/qwen3-30b-a3b",
-    "google/gemini-2.0-flash-001"
+    "openai/gpt-oss-20b:free",
+    "google/gemma-4-31b-it:free"
   ],
   "max_tokens": 1000,
   "temperature": 0.4
@@ -445,7 +445,9 @@ Documents Module -> AI Gateway
 
 ## 20. Streaming
 
-В будущем AI Gateway должен поддерживать streaming.
+AI Gateway поддерживает streaming через `ask_stream`. Provider adapter передаёт
+нормализованные текстовые fragments, а Gateway сохраняет единый формат
+результата, usage, logging, события и secret lease.
 
 Схема:
 
@@ -459,7 +461,9 @@ Backend SSE/WebSocket
 Frontend
 ```
 
-Для ранней версии streaming не обязателен.
+В v0.7.0 streaming используется Live Council. Adapter без собственной
+потоковой реализации остаётся совместимым и передаёт полный ответ одним
+fragment.
 
 ---
 
@@ -486,10 +490,10 @@ AI Council использует AI Gateway для каждого запроса.
 
 ```text
 Council
-  ├── gateway.ask(model_a)
-  ├── gateway.ask(model_b)
-  ├── gateway.ask(model_c)
-  └── gateway.ask(judge_model)
+  ├── gateway.ask_stream(model_a)
+  ├── gateway.ask_stream(model_b)
+  ├── gateway.ask_stream(model_c)
+  └── gateway.ask_stream(judge_model) ──► SSE
 ```
 
 AI Council не должен иметь собственного клиента OpenRouter.
@@ -555,7 +559,8 @@ AI Gateway не принимает торговые решения сам. Он 
 - default model;
 - fallback model;
 - integration with Chat;
-- integration with AI Council.
+- integration with AI Council;
+- streaming interface и cooperative cancellation.
 
 ---
 
@@ -563,7 +568,6 @@ AI Gateway не принимает торговые решения сам. Он 
 
 После v1:
 
-- streaming;
 - cost dashboard;
 - provider health checks;
 - automatic routing;

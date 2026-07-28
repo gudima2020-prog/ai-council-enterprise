@@ -1,0 +1,20 @@
+P1-019.4 — Mandatory Route Authentication and Principal Binding
+
+Revision: 20260716_0034
+
+Added:
+- HumanControlAuthMiddleware;
+- request principal propagation;
+- enforce/audit/legacy route protection;
+- API-token scope checks;
+- Workspace-bound credential validation;
+- authenticated actor and identity binding;
+- spoofed actor_id rejection;
+- protected/public route policy configuration;
+- authenticated operator headers;
+- security journal entries for denied access.
+
+Apply over the project and run:
+  .\db_upgrade.bat
+  .\run_tests.bat
+  .\db_current.bat

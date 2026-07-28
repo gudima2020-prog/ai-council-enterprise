@@ -1,0 +1,19 @@
+P1-019.1 — Human Control Center
+
+Install over the current AI Studio Enterprise project:
+  C:\Projects\ai-council-enterprise
+
+Commands:
+  .\db_upgrade.bat
+  .\run_tests.bat
+  .\db_current.bat
+
+Expected Alembic head:
+  20260716_0031
+
+New tables:
+  human_control_items
+  human_control_actions
+
+The archive is cumulative and includes the P1-017.5–P1-018.10 components
+required by the current backend line.

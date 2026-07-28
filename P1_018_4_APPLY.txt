@@ -1,0 +1,20 @@
+P1-018.4 — Mission Strategy Portfolio and Adaptive Prioritization
+
+Установка:
+1. Распаковать архив поверх C:\Projects\ai-council-enterprise
+2. Запустить:
+   .\run_tests.bat
+   .\db_current.bat
+
+Ожидаемый Alembic head:
+20260716_0024
+
+Архив накопительный и содержит компоненты P1-017.5—P1-018.4.
+
+Безопасность по умолчанию:
+- выбор Strategy выполняется вручную;
+- автоматический выбор отключён;
+- смена Strategy требует пользователя;
+- автоматический режим включается только отдельной Mission Strategy Policy;
+- Planner продолжает работать без выбранной Strategy, поэтому обновление не
+  блокирует существующие Mission.

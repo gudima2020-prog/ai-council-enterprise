@@ -1,14 +1,15 @@
 from backend.core.logging import LoggerManager
-from backend.database.base import Base
-from backend.database.session import engine
-from backend.database import models  # noqa: F401
-from backend.database.migrations import apply_workspace_link_migration
+from backend.database.migration_manager import bootstrap_or_upgrade
 
 
 def initialize_database() -> None:
     logger = LoggerManager.get_logger("database")
+    result = bootstrap_or_upgrade()
 
-    Base.metadata.create_all(bind=engine)
-    apply_workspace_link_migration()
-
-    logger.info("Database initialized")
+    logger.info(
+        "Database migrations completed action=%s before=%s after=%s head=%s",
+        result.get("action"),
+        result.get("before"),
+        result.get("after"),
+        result.get("head"),
+    )

@@ -1,0 +1,18 @@
+P1-020.2 — Secret Access Policies, Ephemeral Leases and Runtime Injection
+
+Apply over:
+C:\Projects\ai-council-enterprise
+
+Commands:
+  .\db_upgrade.bat
+  .\run_tests.bat
+  .\db_current.bat
+
+Expected Alembic head:
+20260716_0042
+
+Optional OpenRouter secret-ref mode:
+  $env:AI_STUDIO_OPENROUTER_SECRET_REF = "secret://windows-dpapi/openrouter/primary"
+
+Recommended security rollout:
+  legacy -> audit -> enforce

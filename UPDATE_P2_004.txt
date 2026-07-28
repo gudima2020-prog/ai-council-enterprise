@@ -1,0 +1,31 @@
+AI Studio Enterprise v0.8.0 / P2-004
+Council Presets & Cost Control
+
+1. Скопируйте файлы обновления поверх C:\Projects\ai-council-enterprise.
+2. Не заменяйте собственный .env и рабочую data\ai_studio.db из архива обновления — они в пакет не включены.
+3. Активируйте .venv.
+4. Выполните:
+   alembic upgrade head
+5. Проверьте:
+   alembic current
+   Ожидается: 20260724_0046 (head)
+6. Запустите backend и frontend штатными bat-файлами проекта.
+
+Новое:
+- сохраняемые составы Council;
+- редактируемые роли участников;
+- отдельная модель-председатель;
+- cost preflight до provider request;
+- Workspace budgets и approvals;
+- одноразовый approval для дорогой/неизвестной стоимости;
+- тот же cost gate для replay/retry failed.
+
+Для точной стоимости metered-модели добавьте в metadata модели:
+{
+  "billing": "metered",
+  "pricing": {
+    "input_per_million_usd": 0.0,
+    "output_per_million_usd": 0.0
+  }
+}
+Замените 0.0 на фактические тарифы. Если pricing отсутствует, стоимость считается неизвестной и по умолчанию требует approval.

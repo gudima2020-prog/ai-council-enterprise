@@ -1,0 +1,11 @@
+P1-016.12 — Dead Letter Queue
+
+1. Распаковать архив поверх C:\Projects\ai-council-enterprise
+2. Выполнить:
+
+   .\run_tests.bat
+   .\db_current.bat
+
+3. Ожидаемая Alembic revision:
+
+   20260715_0009

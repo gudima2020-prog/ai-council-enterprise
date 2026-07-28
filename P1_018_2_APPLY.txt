@@ -1,0 +1,13 @@
+P1-018.2 — Mission Memory, Evidence Evaluation and Goal Confirmation
+
+Установка:
+1. Распаковать архив поверх C:\Projects\ai-council-enterprise
+2. Запустить:
+   .\run_tests.bat
+   .\db_current.bat
+
+Ожидаемый Alembic head:
+20260716_0022
+
+Архив накопительный и содержит компоненты P1-017.5—P1-018.2.
+Автоматическое подтверждение Goals по умолчанию отключено.

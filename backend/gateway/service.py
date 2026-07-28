@@ -1,14 +1,37 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
+from dataclasses import replace
+from inspect import isawaitable
+
 from backend.core.config import AppSettings
 from backend.core.events import Event, EventBus
 from backend.core.logging import LoggerManager
-from backend.gateway.providers.base import ProviderAdapter
+from backend.gateway.health import ProviderHealthService, TransientProviderHealthService
+from backend.gateway.providers.base import ProviderAdapter, ProviderStreamCancelled
 from backend.gateway.schemas import (
+    GatewayError,
     GatewayMessage,
     GatewayRequest,
     GatewayResponse,
 )
+from backend.secrets.injection import SecretLeaseAccessor, build_secret_accessor
+from backend.secrets.schemas import SecretResolveContext
+from backend.secrets.service import SecretManagerService
+
+ProviderFactory = Callable[[str], ProviderAdapter]
+StreamDeltaHandler = Callable[[str], Awaitable[None] | None]
+Route = tuple[str, str]
+
+FAILOVER_ERROR_CODES = {
+    "RATE_LIMIT",
+    "TIMEOUT",
+    "NETWORK_ERROR",
+    "SERVER_ERROR",
+    "MODEL_UNAVAILABLE",
+    "INSUFFICIENT_CREDITS",
+}
 
 
 class AIGateway:
@@ -18,80 +41,156 @@ class AIGateway:
         settings: AppSettings,
         event_bus: EventBus,
         providers: dict[str, ProviderAdapter],
+        secret_manager: SecretManagerService | None = None,
+        provider_secret_refs: dict[str, str] | None = None,
+        provider_factories: dict[str, ProviderFactory] | None = None,
+        fallback_routes: dict[str, list[Route]] | None = None,
+        health_service: ProviderHealthService | None = None,
     ) -> None:
         self._settings = settings
         self._event_bus = event_bus
         self._providers = providers
+        self._secret_manager = secret_manager
+        self._provider_secret_refs = dict(provider_secret_refs or {})
+        self._provider_factories = dict(provider_factories or {})
+        self._fallback_routes = {
+            key: list(value) for key, value in (fallback_routes or {}).items()
+        }
+        self._health = health_service or TransientProviderHealthService()
         self._logger = LoggerManager.get_logger("ai")
 
-    async def ask(
+    def configured_providers(self) -> list[str]:
+        return sorted(
+            set(self._providers)
+            | set(self._provider_secret_refs)
+            | set(self._provider_factories)
+        )
+
+    def _candidate_routes(self, provider: str, model: str) -> list[Route]:
+        routes: list[Route] = [(provider, model)]
+        for candidate in self._fallback_routes.get(provider, []):
+            normalized = (str(candidate[0]).strip(), str(candidate[1]).strip())
+            if normalized[0] and normalized[1] and normalized not in routes:
+                routes.append(normalized)
+        return routes
+
+    async def _adapter_for(
         self,
         *,
-        user_prompt: str,
-        system_prompt: str,
-        model: str | None = None,
-        provider: str | None = None,
-        mode: str = "universal",
-        source: str = "unknown",
-        correlation_id: str | None = None,
-    ) -> GatewayResponse:
-        selected_provider = provider or self._settings.default_provider
-        selected_model = model or self._settings.default_model
+        provider: str,
+        request: GatewayRequest,
+        actor_id: str | None,
+        workspace_id: str | None,
+        correlation_id: str | None,
+    ) -> tuple[ProviderAdapter | None, SecretLeaseAccessor | None]:
+        adapter = self._providers.get(provider)
+        if adapter is not None:
+            return adapter, None
 
-        request = GatewayRequest(
-            messages=[
-                GatewayMessage(role="system", content=system_prompt),
-                GatewayMessage(role="user", content=user_prompt),
-            ],
-            model=selected_model,
-            provider=selected_provider,
-            temperature=self._settings.temperature,
-            max_tokens=self._settings.max_tokens,
-            timeout_seconds=self._settings.request_timeout_seconds,
-            source=source,
-            mode=mode,
-            correlation_id=correlation_id,
-        )
+        secret_ref = self._provider_secret_refs.get(provider)
+        factory = self._provider_factories.get(provider)
+        if not secret_ref or factory is None or self._secret_manager is None:
+            return None, None
 
-        await self._event_bus.publish(
-            Event(
-                event_type="ai.request.created",
+        accessor = await build_secret_accessor(
+            manager=self._secret_manager,
+            bindings={"api_key": secret_ref},
+            context=SecretResolveContext(
+                actor_id=actor_id or request.source or "ai-gateway",
+                purpose=f"AI Gateway provider {provider}",
+                workspace_id=workspace_id,
+                auth_method="runtime",
                 source="ai_gateway",
+                consumer_type="gateway",
+                consumer_key=provider,
                 correlation_id=correlation_id,
-                payload={
-                    "request_id": request.request_id,
-                    "provider": selected_provider,
-                    "model": selected_model,
-                    "source": source,
-                    "mode": mode,
-                },
+                metadata={"request_id": request.request_id},
+            ),
+            ttl_seconds=min(max(5, int(request.timeout_seconds) + 5), 900),
+        )
+        try:
+            api_key = await accessor.get("api_key")
+            return factory(api_key), accessor
+        except Exception:
+            await accessor.close()
+            raise
+
+    @staticmethod
+    def _redact_response(
+        response: GatewayResponse,
+        accessor: SecretLeaseAccessor | None,
+    ) -> GatewayResponse:
+        if accessor is None:
+            return response
+        safe_error = response.error
+        if safe_error is not None:
+            safe_error = replace(
+                safe_error,
+                message=accessor.redact_text(safe_error.message),
             )
+        return replace(
+            response,
+            content=accessor.redact_text(response.content),
+            error=safe_error,
         )
 
-        adapter = self._providers.get(selected_provider)
-        if adapter is None:
-            raise RuntimeError(
-                f"AI provider is not registered: {selected_provider}"
+    def _circuit_available(self, provider: str) -> bool:
+        try:
+            return self._health.circuit_available(provider)
+        except Exception as exc:
+            self._logger.warning(
+                "Provider health read failed provider=%s error=%s",
+                provider,
+                exc.__class__.__name__,
+            )
+            return True
+
+    def _record_success(self, provider: str, latency_ms: float | None) -> None:
+        try:
+            self._health.record_success(provider, latency_ms)
+        except Exception as exc:
+            self._logger.warning(
+                "Provider health success write failed provider=%s error=%s",
+                provider,
+                exc.__class__.__name__,
             )
 
-        self._logger.info(
-            "AI request started request_id=%s provider=%s model=%s source=%s",
-            request.request_id,
-            selected_provider,
-            selected_model,
-            source,
+    def _record_failure(
+        self,
+        provider: str,
+        latency_ms: float | None,
+        error_code: str | None,
+        *,
+        circuit_eligible: bool,
+    ) -> None:
+        try:
+            self._health.record_failure(
+                provider,
+                latency_ms,
+                error_code,
+                circuit_eligible=circuit_eligible,
+            )
+        except Exception as exc:
+            self._logger.warning(
+                "Provider health failure write failed provider=%s error=%s",
+                provider,
+                exc.__class__.__name__,
+            )
+
+    @staticmethod
+    def _failover_eligible(response: GatewayResponse) -> bool:
+        return bool(
+            response.error and response.error.code in FAILOVER_ERROR_CODES
         )
 
-        response = adapter.complete(request)
-
+    async def _publish_result(
+        self,
+        response: GatewayResponse,
+        *,
+        correlation_id: str | None,
+        stream: bool,
+    ) -> None:
         if response.status == "success":
-            self._logger.info(
-                "AI request completed request_id=%s provider=%s model=%s latency_ms=%s",
-                response.request_id,
-                response.provider,
-                response.model,
-                response.latency_ms,
-            )
             await self._event_bus.publish(
                 Event(
                     event_type="ai.response.received",
@@ -105,17 +204,14 @@ class AIGateway:
                         "input_tokens": response.usage.input_tokens,
                         "output_tokens": response.usage.output_tokens,
                         "total_tokens": response.usage.total_tokens,
+                        "stream": stream,
+                        "failover_used": bool(
+                            response.metadata.get("failover_used")
+                        ),
                     },
                 )
             )
         else:
-            self._logger.warning(
-                "AI request failed request_id=%s provider=%s model=%s code=%s",
-                response.request_id,
-                response.provider,
-                response.model,
-                response.error.code if response.error else "UNKNOWN_ERROR",
-            )
             await self._event_bus.publish(
                 Event(
                     event_type="ai.response.failed",
@@ -130,8 +226,348 @@ class AIGateway:
                             if response.error
                             else "UNKNOWN_ERROR"
                         ),
+                        "stream": stream,
                     },
                 )
             )
 
-        return response
+    async def ask(
+        self,
+        *,
+        user_prompt: str,
+        system_prompt: str,
+        model: str | None = None,
+        provider: str | None = None,
+        mode: str = "universal",
+        source: str = "unknown",
+        correlation_id: str | None = None,
+        workspace_id: str | None = None,
+        actor_id: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> GatewayResponse:
+        selected_provider = provider or self._settings.default_provider
+        selected_model = model or self._settings.default_model
+        base_request = GatewayRequest(
+            messages=[
+                GatewayMessage(role="system", content=system_prompt),
+                GatewayMessage(role="user", content=user_prompt),
+            ],
+            model=selected_model,
+            provider=selected_provider,
+            temperature=self._settings.temperature,
+            max_tokens=self._settings.max_tokens,
+            timeout_seconds=(
+                timeout_seconds
+                if timeout_seconds is not None
+                else self._settings.request_timeout_seconds
+            ),
+            source=source,
+            mode=mode,
+            workspace_id=workspace_id,
+            correlation_id=correlation_id,
+        )
+        routes = self._candidate_routes(selected_provider, selected_model)
+        await self._event_bus.publish(
+            Event(
+                event_type="ai.request.created",
+                source="ai_gateway",
+                correlation_id=correlation_id,
+                payload={
+                    "request_id": base_request.request_id,
+                    "provider": selected_provider,
+                    "model": selected_model,
+                    "source": source,
+                    "mode": mode,
+                    "candidate_routes": [
+                        {"provider": p, "model": m} for p, m in routes
+                    ],
+                },
+            )
+        )
+
+        last_response: GatewayResponse | None = None
+        for attempt, (route_provider, route_model) in enumerate(routes, start=1):
+            request = replace(
+                base_request, provider=route_provider, model=route_model
+            )
+            if not self._circuit_available(route_provider):
+                last_response = GatewayResponse(
+                    request_id=request.request_id,
+                    provider=route_provider,
+                    model=route_model,
+                    content="",
+                    status="error",
+                    error=GatewayError(
+                        code="CIRCUIT_OPEN",
+                        message="Провайдер временно исключён circuit breaker.",
+                        provider=route_provider,
+                        recoverable=True,
+                    ),
+                    metadata={"attempt": attempt, "circuit_skipped": True},
+                )
+                continue
+
+            adapter: ProviderAdapter | None = None
+            accessor: SecretLeaseAccessor | None = None
+            try:
+                adapter, accessor = await self._adapter_for(
+                    provider=route_provider,
+                    request=request,
+                    actor_id=actor_id,
+                    workspace_id=workspace_id,
+                    correlation_id=correlation_id,
+                )
+                if adapter is None:
+                    last_response = GatewayResponse(
+                        request_id=request.request_id,
+                        provider=route_provider,
+                        model=route_model,
+                        content="",
+                        status="error",
+                        error=GatewayError(
+                            code="PROVIDER_NOT_CONFIGURED",
+                            message=f"AI provider is not configured: {route_provider}",
+                            provider=route_provider,
+                            recoverable=False,
+                        ),
+                    )
+                    continue
+
+                self._logger.info(
+                    "AI request attempt request_id=%s attempt=%s provider=%s model=%s",
+                    request.request_id,
+                    attempt,
+                    route_provider,
+                    route_model,
+                )
+                response = await asyncio.to_thread(adapter.complete, request)
+                response = self._redact_response(response, accessor)
+            finally:
+                if accessor is not None:
+                    await accessor.close()
+
+            if response.status == "success":
+                self._record_success(route_provider, response.latency_ms)
+                response = replace(
+                    response,
+                    metadata={
+                        **response.metadata,
+                        "attempt": attempt,
+                        "requested_provider": selected_provider,
+                        "requested_model": selected_model,
+                        "failover_used": attempt > 1,
+                        "route": [
+                            {"provider": p, "model": m}
+                            for p, m in routes[:attempt]
+                        ],
+                    },
+                )
+                await self._publish_result(
+                    response, correlation_id=correlation_id, stream=False
+                )
+                return response
+
+            eligible = self._failover_eligible(response)
+            self._record_failure(
+                route_provider,
+                response.latency_ms,
+                response.error.code if response.error else None,
+                circuit_eligible=eligible,
+            )
+            last_response = response
+            if not eligible:
+                break
+            if attempt < len(routes):
+                await self._event_bus.publish(
+                    Event(
+                        event_type="ai.provider.failover",
+                        source="ai_gateway",
+                        correlation_id=correlation_id,
+                        payload={
+                            "request_id": request.request_id,
+                            "from_provider": route_provider,
+                            "from_model": route_model,
+                            "error_code": (
+                                response.error.code
+                                if response.error
+                                else "UNKNOWN_ERROR"
+                            ),
+                            "to_provider": routes[attempt][0],
+                            "to_model": routes[attempt][1],
+                        },
+                    )
+                )
+
+        if last_response is None:
+            last_response = GatewayResponse(
+                request_id=base_request.request_id,
+                provider=selected_provider,
+                model=selected_model,
+                content="",
+                status="error",
+                error=GatewayError(
+                    code="NO_ROUTE",
+                    message="Нет доступного маршрута к ИИ-провайдеру.",
+                    provider=selected_provider,
+                    recoverable=True,
+                ),
+            )
+        await self._publish_result(
+            last_response, correlation_id=correlation_id, stream=False
+        )
+        return last_response
+
+    async def ask_stream(
+        self,
+        *,
+        user_prompt: str,
+        system_prompt: str,
+        on_delta: StreamDeltaHandler,
+        model: str | None = None,
+        provider: str | None = None,
+        mode: str = "universal",
+        source: str = "unknown",
+        correlation_id: str | None = None,
+        workspace_id: str | None = None,
+        actor_id: str | None = None,
+        timeout_seconds: int | None = None,
+        cancellation_check: Callable[[], bool] | None = None,
+    ) -> GatewayResponse:
+        selected_provider = provider or self._settings.default_provider
+        selected_model = model or self._settings.default_model
+        base_request = GatewayRequest(
+            messages=[
+                GatewayMessage(role="system", content=system_prompt),
+                GatewayMessage(role="user", content=user_prompt),
+            ],
+            model=selected_model,
+            provider=selected_provider,
+            temperature=self._settings.temperature,
+            max_tokens=self._settings.max_tokens,
+            timeout_seconds=(
+                timeout_seconds
+                if timeout_seconds is not None
+                else self._settings.request_timeout_seconds
+            ),
+            source=source,
+            mode=mode,
+            workspace_id=workspace_id,
+            correlation_id=correlation_id,
+        )
+        routes = self._candidate_routes(selected_provider, selected_model)
+        await self._event_bus.publish(
+            Event(
+                event_type="ai.request.created",
+                source="ai_gateway",
+                correlation_id=correlation_id,
+                payload={
+                    "request_id": base_request.request_id,
+                    "provider": selected_provider,
+                    "model": selected_model,
+                    "source": source,
+                    "mode": mode,
+                    "stream": True,
+                },
+            )
+        )
+        loop = asyncio.get_running_loop()
+
+        async def deliver(delta: str) -> None:
+            result = on_delta(delta)
+            if isawaitable(result):
+                await result
+
+        def relay(delta: str) -> None:
+            future = asyncio.run_coroutine_threadsafe(deliver(delta), loop)
+            future.result()
+
+        last_response: GatewayResponse | None = None
+        emitted_content = False
+        for attempt, (route_provider, route_model) in enumerate(routes, start=1):
+            if cancellation_check is not None and cancellation_check():
+                raise ProviderStreamCancelled("Provider stream was cancelled.")
+            request = replace(
+                base_request, provider=route_provider, model=route_model
+            )
+            if not self._circuit_available(route_provider):
+                continue
+            adapter = None
+            accessor = None
+            attempt_emitted = False
+
+            def guarded_relay(delta: str) -> None:
+                nonlocal attempt_emitted, emitted_content
+                attempt_emitted = True
+                emitted_content = True
+                relay(delta)
+
+            try:
+                adapter, accessor = await self._adapter_for(
+                    provider=route_provider,
+                    request=request,
+                    actor_id=actor_id,
+                    workspace_id=workspace_id,
+                    correlation_id=correlation_id,
+                )
+                if adapter is None:
+                    continue
+                response = await asyncio.to_thread(
+                    adapter.complete_stream,
+                    request,
+                    guarded_relay,
+                    cancellation_check,
+                )
+                response = self._redact_response(response, accessor)
+            finally:
+                if accessor is not None:
+                    await accessor.close()
+
+            if response.status == "success":
+                self._record_success(route_provider, response.latency_ms)
+                response = replace(
+                    response,
+                    metadata={
+                        **response.metadata,
+                        "attempt": attempt,
+                        "requested_provider": selected_provider,
+                        "requested_model": selected_model,
+                        "failover_used": attempt > 1,
+                    },
+                )
+                await self._publish_result(
+                    response, correlation_id=correlation_id, stream=True
+                )
+                return response
+
+            eligible = self._failover_eligible(response)
+            self._record_failure(
+                route_provider,
+                response.latency_ms,
+                response.error.code if response.error else None,
+                circuit_eligible=eligible,
+            )
+            last_response = response
+            # Once any streamed content reached the caller, switching providers
+            # would create a mixed answer. Failover is therefore only safe before
+            # the first emitted delta.
+            if attempt_emitted or emitted_content or not eligible:
+                break
+
+        if last_response is None:
+            last_response = GatewayResponse(
+                request_id=base_request.request_id,
+                provider=selected_provider,
+                model=selected_model,
+                content="",
+                status="error",
+                error=GatewayError(
+                    code="NO_ROUTE",
+                    message="Нет доступного маршрута к ИИ-провайдеру.",
+                    provider=selected_provider,
+                    recoverable=True,
+                ),
+            )
+        await self._publish_result(
+            last_response, correlation_id=correlation_id, stream=True
+        )
+        return last_response

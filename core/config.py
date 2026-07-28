@@ -16,7 +16,7 @@ DATA_DIR.mkdir(exist_ok=True)
 @dataclass(frozen=True)
 class Settings:
     openrouter_api_key: str
-    default_model: str = "deepseek/deepseek-chat-v3-0324"
+    default_model: str = "openrouter/free"
     language: str = "ru"
 
     @classmethod
@@ -26,7 +26,7 @@ class Settings:
         api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         default_model = os.getenv(
             "OPENROUTER_DEFAULT_MODEL",
-            "deepseek/deepseek-chat-v3-0324",
+            "openrouter/free",
         ).strip()
 
         if not api_key:

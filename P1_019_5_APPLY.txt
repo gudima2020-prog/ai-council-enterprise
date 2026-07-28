@@ -1,0 +1,21 @@
+P1-019.5 — Browser Security, CSRF and Trusted Clients
+
+Revision: 20260716_0035
+
+Apply over C:\Projects\ai-council-enterprise and run:
+  .\db_upgrade.bat
+  .\run_tests.bat
+  .\db_current.bat
+
+Expected Alembic head:
+  20260716_0035
+
+Added:
+- HttpOnly browser sessions;
+- CSRF double-submit validation;
+- trusted browser client registry;
+- Origin admission policy;
+- Secure/SameSite cookie policy;
+- optional user-agent and IP session binding;
+- browser session logout and CSRF rotation;
+- persistent security events and audit integration.

@@ -1,0 +1,19 @@
+P1-018.8 — Workspace Shared Budget and Capacity Pool
+
+Apply:
+1. Extract this archive over C:\Projects\ai-council-enterprise
+2. Run:
+   .\run_tests.bat
+   .\db_current.bat
+
+Expected Alembic head:
+20260716_0028
+
+No new external Python dependency is required.
+
+Safety defaults:
+- Workspace pool disabled
+- manual allocation mode
+- human approval required
+- automatic rebalance disabled
+- cycle admission enforcement disabled

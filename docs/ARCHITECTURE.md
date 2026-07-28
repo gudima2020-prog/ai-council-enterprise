@@ -246,7 +246,7 @@ providers/
 ```json
 {
   "provider": "openrouter",
-  "model": "deepseek/deepseek-chat-v3-0324",
+  "model": "openrouter/free",
   "content": "Ответ модели",
   "usage": {
     "prompt_tokens": 100,
@@ -437,22 +437,28 @@ AI Council является сервисом коллективного анал
 - выделение совпадений;
 - выделение расхождений;
 - итоговый вывод;
-- оценка уверенности.
+- оценка уверенности;
+- Workspace-изолированная история запусков;
+- просмотр, replay, удаление и retention policy;
+- фоновый live manager, SSE buffer и cooperative cancellation;
+- потоковый синтез через единый AI Gateway;
+- повтор только неуспешных участников.
 
 Схема:
 
 ```text
 Council Request
   │
-  ├── Model A
-  ├── Model B
-  ├── Model C
+  ├── Model A ─┐
+  ├── Model B ─┼── Live events
+  ├── Model C ─┘
   │
   ▼
 Consensus Engine
   │
+  ├── Provider stream ──► SSE buffer ──► React EventSource
   ▼
-Final Answer
+Persisted Final Answer
 ```
 
 ---

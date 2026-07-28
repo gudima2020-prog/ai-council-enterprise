@@ -41,13 +41,13 @@ class AppSettings:
 class ConfigurationManager:
     DEFAULTS: dict[str, Any] = {
         "app_name": "AI Studio Enterprise",
-        "app_version": "0.5.0",
+        "app_version": "0.14.0",
         "environment": "development",
         "debug": True,
         "host": "127.0.0.1",
         "port": 8000,
         "default_provider": "openrouter",
-        "default_model": "deepseek/deepseek-chat-v3-0324",
+        "default_model": "openrouter/free",
         "max_tokens": 1000,
         "temperature": 0.4,
         "request_timeout_seconds": 60
@@ -62,6 +62,7 @@ class ConfigurationManager:
         "AI_STUDIO_PORT": "port",
         "AI_STUDIO_DEFAULT_PROVIDER": "default_provider",
         "OPENROUTER_DEFAULT_MODEL": "default_model",
+        "AI_STUDIO_DEFAULT_MODEL": "default_model",
         "AI_STUDIO_MAX_TOKENS": "max_tokens",
         "AI_STUDIO_TEMPERATURE": "temperature",
         "AI_STUDIO_REQUEST_TIMEOUT_SECONDS": "request_timeout_seconds"

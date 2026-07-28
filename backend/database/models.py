@@ -227,6 +227,24 @@ class ModelConfigModel(Base):
     )
 
 
+class GatewayProviderStatsModel(Base):
+    __tablename__ = "gateway_provider_stats"
+
+    provider: Mapped[str] = mapped_column(String(64), primary_key=True)
+    total_requests: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    successful_requests: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_requests: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    ema_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    circuit_open_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
 class MemoryItemModel(Base):
     __tablename__ = "memory_items"
 

@@ -1,0 +1,26 @@
+P1-018.10 — Mission Forecast Calibration and Learning Loop
+
+Install:
+1. Extract this cumulative archive over:
+   C:\Projects\ai-council-enterprise
+2. Run:
+   .\db_upgrade.bat
+   .\run_tests.bat
+   .\db_current.bat
+
+Expected Alembic head:
+20260716_0030
+
+New tables:
+- mission_learning_policies
+- mission_forecast_outcomes
+- mission_forecast_calibrations
+- mission_learning_runs
+- mission_learning_signals
+
+Safety:
+- automatic learning and automatic application are disabled by default;
+- outcome capture is observational;
+- calibrations affect only future advisory forecasts;
+- explicit approval is required unless an adaptive policy deliberately
+  disables human approval and enables automatic application.

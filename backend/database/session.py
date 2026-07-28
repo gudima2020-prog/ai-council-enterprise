@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
@@ -9,9 +10,17 @@ from sqlalchemy.orm import Session, sessionmaker
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data"
-DATABASE_PATH = DATA_DIR / "ai_studio.db"
 
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+def _resolve_database_path() -> Path:
+    configured_path = os.getenv("AI_STUDIO_DATABASE_PATH", "").strip()
+    if configured_path:
+        return Path(configured_path).expanduser().resolve()
+    return DATA_DIR / "ai_studio.db"
+
+
+DATABASE_PATH = _resolve_database_path()
+DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{DATABASE_PATH.as_posix()}"
 

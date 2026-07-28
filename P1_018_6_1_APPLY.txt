@@ -1,0 +1,23 @@
+P1-018.6.1 — Windows timezone compatibility fix
+
+Cause:
+Python on Windows does not ship the IANA timezone database. Without the
+optional tzdata package, zoneinfo.ZoneInfo("UTC") can raise
+ZoneInfoNotFoundError.
+
+Fix:
+- UTC/GMT aliases now use datetime.timezone.utc and work without tzdata.
+- Invalid non-UTC zones still produce a controlled validation error.
+- install_timezone_data.bat installs the IANA database required for zones
+  such as Europe/Moscow and Europe/Stockholm.
+- No database migration is required.
+
+Apply:
+1. Extract this archive over C:\Projects\ai-council-enterprise
+2. Run:
+   .\install_timezone_data.bat
+   .\run_tests.bat
+   .\db_current.bat
+
+Expected Alembic head:
+20260716_0026

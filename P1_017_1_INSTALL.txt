@@ -1,0 +1,6 @@
+P1-017.1 — Execution Plan Core
+
+1. Распаковать архив поверх C:\Projects\ai-council-enterprise
+2. Выполнить .\run_tests.bat
+3. Выполнить .\db_current.bat
+4. Ожидаемая миграция: 20260715_0010

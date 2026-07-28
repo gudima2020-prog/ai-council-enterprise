@@ -1,0 +1,19 @@
+P1-020.1.1 — Secrets router import fix
+
+Причина:
+backend/main.py регистрирует secrets.router, но модуль secrets не был добавлен
+в блок `from backend.routers import (...)`.
+
+Исправление:
+- добавлен `secrets` в импорт роутеров;
+- добавлен регрессионный тест регистрации `/api/secrets/status`;
+- миграция базы данных не требуется.
+
+Применение:
+1. Распаковать архив поверх C:\Projects\ai-council-enterprise
+2. Запустить:
+   .\run_tests.bat
+   .\db_current.bat
+
+Ожидаемый Alembic head:
+20260716_0041

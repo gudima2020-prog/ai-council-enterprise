@@ -1,0 +1,9 @@
+AI Studio Enterprise v0.12.0 — P2-008 Council-to-Sandbox Agent Execution
+
+1. Extract UPDATE over the existing v0.11.2/P2-007.2 project.
+2. Activate .venv.
+3. Run: python -m alembic upgrade head
+4. Confirm: python -m alembic current -> 20260724_0050 (head)
+5. Run: verify_p2_008.bat
+
+P2-008 does not grant the LLM shell/network/secret access and never auto-applies a generated patch to the base repository.

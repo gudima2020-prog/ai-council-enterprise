@@ -1,0 +1,10 @@
+AI Studio Enterprise v0.13.0 / P2-009 Multi-Provider Model Gateway
+
+1. Close running AI Studio processes.
+2. Extract UPDATE over the existing v0.12.0/P2-008 project.
+3. Activate .venv.
+4. Run: python -m alembic upgrade head
+5. Confirm: python -m alembic current -> 20260724_0051 (head)
+6. Run: verify_p2_009.bat
+7. Optional SVRTR: configure AI_STUDIO_SVRTR_SECRET_REF or SVRTR_API_KEY.
+8. Optional failover: configure AI_STUDIO_GATEWAY_FAILOVER_JSON explicitly.

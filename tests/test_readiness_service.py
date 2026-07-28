@@ -18,7 +18,7 @@ def make_settings() -> AppSettings:
         port=8000,
         openrouter_api_key="",
         default_provider="openrouter",
-        default_model="deepseek/deepseek-chat-v3-0324",
+        default_model="openrouter/free",
         max_tokens=1000,
         temperature=0.4,
         request_timeout_seconds=60,

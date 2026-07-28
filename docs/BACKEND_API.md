@@ -1,6 +1,6 @@
 # AI Studio Enterprise Backend API
 
-Версия: `v0.3`
+Версия: `v0.9.0`
 
 ## Запуск
 
@@ -56,10 +56,42 @@ POST /api/chat
 {
   "message": "Привет! Ответь одной фразой.",
   "mode": "universal",
-  "model": "deepseek/deepseek-chat-v3-0324"
+  "model": "openrouter/free"
 }
 ```
 
-## Следующий этап
+### AI Council
 
-Добавить React frontend и подключить его к этим endpoints.
+```text
+GET  /api/council/status
+POST /api/council/run
+POST /api/council/live
+GET  /api/council/live/{run_id}
+GET  /api/council/live/{run_id}/events
+DELETE /api/council/live/{run_id}
+GET  /api/council/runs
+GET  /api/council/runs/{run_id}
+POST /api/council/runs/{run_id}/replay
+POST /api/council/runs/{run_id}/replay/live
+POST /api/council/runs/{run_id}/retry-failed
+DELETE /api/council/runs/{run_id}
+GET  /api/council/retention
+PUT  /api/council/retention
+POST /api/council/retention/purge
+GET  /api/council/presets
+POST /api/council/presets
+GET  /api/council/cost/policy
+PUT  /api/council/cost/policy
+POST /api/council/cost/estimate
+POST /api/council/cost/approve
+GET  /api/council/cost/usage
+POST /api/council/cost/route
+```
+
+Подробный формат:
+
+- `docs/P2_001_AI_COUNCIL_API_UI.md`;
+- `docs/P2_002_COUNCIL_HISTORY.md`;
+- `docs/P2_003_LIVE_COUNCIL.md`;
+- `docs/P2_004_COUNCIL_PRESETS_COST_CONTROL.md`;
+- `docs/P2_005_COST_LEDGER_ROUTING.md`.

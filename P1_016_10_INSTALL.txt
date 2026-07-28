@@ -1,0 +1,13 @@
+P1-016.10 — Immutable Task Audit Trail
+
+1. Распаковать архив поверх:
+   C:\Projects\ai-council-enterprise
+
+2. Запустить:
+   .\run_tests.bat
+
+3. Проверить миграцию:
+   .\db_current.bat
+
+Ожидаемая head revision:
+   20260715_0007

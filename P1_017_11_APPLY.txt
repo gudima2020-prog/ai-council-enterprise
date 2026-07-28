@@ -1,0 +1,22 @@
+P1-017.11 — Distributed Event Transport and Remote Executor Protocol
+
+Архив накопительный и содержит компоненты P1-017.5—P1-017.11.
+
+Применение:
+1. Распаковать архив поверх:
+   C:\Projects\ai-council-enterprise
+2. Запустить:
+   .\run_tests.bat
+   .\db_current.bat
+
+Ожидаемая ревизия Alembic:
+20260715_0020
+
+Добавлены:
+- durable event transport;
+- remote executor sessions и protocol negotiation;
+- event lease, renew, ack/nack;
+- retry и dead-letter replay;
+- idempotent publish и receipts;
+- EventBus-to-transport bridge;
+- integrity verification и background reconciliation.

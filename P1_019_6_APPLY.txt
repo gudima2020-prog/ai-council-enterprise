@@ -1,0 +1,22 @@
+P1-019.6 — Operator Notifications and Acknowledgement Tracking
+
+Apply over:
+C:\Projects\ai-council-enterprise
+
+Commands:
+  .\db_upgrade.bat
+  .\run_tests.bat
+  .\db_current.bat
+
+Expected Alembic head:
+20260716_0036
+
+New environment settings:
+  AI_STUDIO_HUMAN_CONTROL_NOTIFICATION_SECONDS=10
+  AI_STUDIO_HUMAN_CONTROL_NOTIFICATION_BATCH=100
+
+Built-in channel:
+  builtin.in_app
+
+Built-in subscription:
+  builtin.owner-critical

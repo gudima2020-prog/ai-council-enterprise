@@ -1,0 +1,19 @@
+P1-018.3 — Mission Risk Register, Hypotheses and Decision Checkpoints
+
+Установка:
+1. Распаковать архив поверх C:\Projects\ai-council-enterprise
+2. Запустить:
+   .\run_tests.bat
+   .\db_current.bat
+
+Ожидаемый Alembic head:
+20260716_0023
+
+Архив накопительный и содержит компоненты P1-017.5—P1-018.3.
+
+Безопасность по умолчанию:
+- Decision Checkpoint требует решения пользователя;
+- автоматическое решение отключено;
+- high/critical Risk создаёт блокирующий Checkpoint;
+- Mission Cycle не запускается до разрешения блокирующего Checkpoint;
+- force bypass явно фиксируется в admission context.

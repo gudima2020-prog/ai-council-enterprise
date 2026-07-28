@@ -1,0 +1,23 @@
+P1-018.1 — Autonomous Workspaces and Long-Running Missions
+
+Архив накопительный и содержит компоненты P1-017.5—P1-017.11,
+а также P1-018.1.
+
+Применение:
+1. Распаковать архив поверх:
+   C:\Projects\ai-council-enterprise
+2. Запустить:
+   .\run_tests.bat
+   .\db_current.bat
+
+Ожидаемая ревизия Alembic:
+20260716_0021
+
+Добавлены:
+- Workspace autonomy policy;
+- долгосрочные Mission и Goal DAG;
+- взвешенный прогресс и evidence journal;
+- циклы планирования с idempotency key;
+- генерация Execution Plan через Planner Service;
+- безопасные режимы observe/supervised/autonomous;
+- фоновый scheduler и обработка terminal Plan events.

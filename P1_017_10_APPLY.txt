@@ -1,0 +1,16 @@
+P1-017.10 — Distributed Workers, Leases and Horizontal Scaling
+
+Применение:
+1. Распаковать архив поверх C:\Projects\ai-council-enterprise
+2. Выполнить:
+   .\run_tests.bat
+   .\db_current.bat
+
+Ожидаемый Alembic head:
+20260715_0019
+
+Локальный distributed Worker по умолчанию выключен.
+Для включения:
+AI_STUDIO_DISTRIBUTED_WORKER_ENABLED=1
+
+Для нескольких процессов назначьте каждому уникальный AI_STUDIO_WORKER_KEY.
