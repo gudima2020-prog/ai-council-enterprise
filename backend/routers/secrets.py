@@ -24,6 +24,11 @@ from backend.secrets.schemas import (
     SecretRotateRequest,
     SecretStateRequest,
     SecretVerifyRequest,
+    SecretRotationPolicyUpsert,
+    SecretHealthAlertDecision,
+    SecretLifecycleScanRequest,
+    SecretRotationRunCreate,
+    SecretRotationRunDecision,
 )
 from backend.secrets.service import (
     SecretConflict,

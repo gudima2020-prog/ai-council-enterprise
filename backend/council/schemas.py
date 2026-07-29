@@ -29,7 +29,7 @@ class CouncilMemberRequest(BaseModel):
 
     model: str = Field(..., min_length=1, max_length=255)
     provider: str = Field(default="openrouter", min_length=1, max_length=64)
-    role: CouncilRole = CouncilRole.ANALYS
+    role: CouncilRole = CouncilRole.ANALYST
     label: str | None = Field(default=None, max_length=120)
 
 
@@ -192,7 +192,7 @@ class CouncilRunResponse(BaseModel):
     synthesis: CouncilSynthesis
     started_at: datetime
     finished_at: datetime
-    duration_ms: floa
+    duration_ms: float
     history_saved: bool = False
     replay_of_run_id: str | None = None
     estimated_cost_usd: float | None = None
@@ -211,10 +211,10 @@ class CouncilRunSummary(BaseModel):
     status: Literal["completed", "partial", "failed", "cancelled"]
     question_preview: str
     mode: str
-    member_count: in
-    successful_member_count: in
+    member_count: int
+    successful_member_count: int
     confidence: int | None = None
-    duration_ms: floa
+    duration_ms: float
     replay_of_run_id: str | None = None
     estimated_cost_usd: float | None = None
     cost_estimate_status: str | None = None
@@ -228,9 +228,9 @@ class CouncilRunSummary(BaseModel):
 class CouncilRunHistoryPage(BaseModel):
     workspace_id: str | None = None
     items: list[CouncilRunSummary]
-    total: in
-    limit: in
-    offset: in
+    total: int
+    limit: int
+    offset: int
     has_more: bool
 
 
@@ -253,13 +253,13 @@ class CouncilRunHistoryDetail(BaseModel):
     mode: str
     members: list[CouncilMemberResult]
     synthesis: CouncilSynthesis | None = None
-    member_count: in
-    successful_member_count: in
+    member_count: int
+    successful_member_count: int
     correlation_id: str | None = None
     actor_id: str | None = None
     error_code: str | None = None
     error_message: str | None = None
-    duration_ms: floa
+    duration_ms: float
     started_at: datetime
     finished_at: datetime
     orchestration: CouncilOrchestrationTrace = Field(default_factory=CouncilOrchestrationTrace)
@@ -289,8 +289,8 @@ class CouncilRetentionPolicyUpdate(BaseModel):
 
 class CouncilRetentionPurgeResponse(BaseModel):
     workspace_id: str | None = None
-    retention_days: in
-    deleted_count: in
+    retention_days: int
+    deleted_count: int
 
 
 class CouncilLiveStartResponse(BaseModel):
@@ -315,7 +315,7 @@ class CouncilLiveStatusResponse(BaseModel):
     ]
     kind: Literal["run", "replay", "retry_failed"]
     replay_of_run_id: str | None = None
-    event_count: in
+    event_count: int
     started_at: datetime
     finished_at: datetime | None = None
 
@@ -390,7 +390,7 @@ class CouncilPreset(BaseModel):
     arbiter_model: str | None = None
     delegation_max_calls: int = 4
     delegation_max_depth: int = 1
-    member_timeout_seconds: in
+    member_timeout_seconds: int
     created_at: datetime
     updated_at: datetime
 
@@ -437,8 +437,8 @@ class CouncilCostLine(BaseModel):
     model: str
     label: str
     billing: str
-    input_tokens_estimate: in
-    output_tokens_estimate: in
+    input_tokens_estimate: int
+    output_tokens_estimate: int
     estimated_cost_usd: float | None = None
     pricing_known: bool
 
@@ -502,7 +502,7 @@ class CouncilRoutingChange(BaseModel):
     from_model: str
     to_model: str
     from_estimated_cost_usd: float | None = None
-    to_estimated_cost_usd: floa
+    to_estimated_cost_usd: float
     estimated_savings_usd: float | None = None
     reason: str
 

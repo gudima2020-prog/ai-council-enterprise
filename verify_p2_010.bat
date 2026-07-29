@@ -44,7 +44,8 @@ python -m pytest -q ^
   tests/test_gateway_errors.py ^
   tests/test_model_manager.py ^
   tests/test_gateway_multi_provider.py ^
-  tests/test_migration_manager.py
+  tests/test_migration_manager.py ^
+  tests/test_openapi_schema.py
 if errorlevel 1 exit /b 1
 
 echo.
