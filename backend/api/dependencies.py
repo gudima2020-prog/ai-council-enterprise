@@ -9,6 +9,9 @@ from backend.core.container import AppContainer
 from backend.code_sandbox.service import CodeSandboxService
 from backend.code_sandbox.agent import CodeAgentService
 from backend.code_sandbox.runtime import IsolatedRuntimeService
+from backend.code_sandbox.runtime_policy import (
+    IsolatedRuntimePolicy,
+)
 from backend.gateway.factory import build_ai_gateway
 from backend.council.control import CouncilControlService
 from backend.council.history import CouncilHistoryService
@@ -16,6 +19,7 @@ from backend.council.live import CouncilLiveManager
 from backend.council.repository import CouncilRunRepository
 from backend.database.session import session_scope
 from backend.repositories.settings import SettingsRepository
+from backend.runtime_policy import DataClassification
 from backend.services.workspace_policy import WorkspacePolicyService
 from backend.services.workspace_state import ActiveWorkspaceService
 from backend.services.workspaces import WorkspaceService
@@ -99,11 +103,38 @@ def get_isolated_runtime_service(
     session: Session = Depends(get_db_session),
     container: AppContainer = Depends(get_container),
 ) -> IsolatedRuntimeService:
-    sandbox = CodeSandboxService(session=session, event_bus=container.event_bus)
+    sandbox = CodeSandboxService(
+        session=session,
+        event_bus=container.event_bus,
+    )
+    policy_service = (
+        container.workspace_policy_service(
+            session
+        )
+    )
+
+    def resolve_data_classification(
+        workspace_id: str | None,
+    ) -> DataClassification:
+        if workspace_id is None:
+            return DataClassification.INTERNAL
+
+        return (
+            policy_service
+            .get_effective_policy(workspace_id)
+            .data_classification
+        )
+
+    runtime_policy = IsolatedRuntimePolicy(
+        event_bus=container.event_bus,
+        resolver=resolve_data_classification,
+    )
+
     return IsolatedRuntimeService(
         session=session,
         event_bus=container.event_bus,
         sandbox=sandbox,
+        runtime_policy=runtime_policy,
     )
 
 

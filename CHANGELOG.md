@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.15.0 — P2-011 Runtime Policy, Trust and Data Classification — 2026-07-30
+
+- Added deterministic fail-closed policy core with reason codes and SHA-256 fingerprints.
+- Added Workspace-scoped data classification and provider trust persistence/API.
+- Enforced policy on every AI Gateway primary and failover route before adapter execution and secret injection.
+- Added host metadata-validation and isolated-container runtime trust boundaries.
+- Added fail-closed runtime-policy resolution and policy snapshots in runtime metadata/events.
+- Restricted artifact export is denied; confidential export requires approval; policy is rechecked before ZIP download.
+- Added React Workspace Policy UI with provider trust controls, warnings, save and reset flows.
+- Added `verify_p2_011.bat`; full backend regression and frontend production build pass.
+- Alembic head remains `20260724_0052`; no schema migration is required.
+
 ## v0.14.0 — P2-010 Docker Isolated Runtime — 2026-07-27
 
 - Docker-backed verification boundary for untrusted pytest/build execution.

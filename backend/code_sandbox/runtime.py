@@ -15,6 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.code_sandbox.models import CodeSandboxRuntimeRunModel, utc_now
+from backend.code_sandbox.runtime_policy import (
+    IsolatedRuntimePolicy,
+    RuntimePolicyEvaluation,
+)
 from backend.code_sandbox.schemas import (
     CodeSandboxSession,
     CodeSandboxVerificationItem,
@@ -33,6 +37,18 @@ class IsolatedRuntimeError(CodeSandboxError):
 
 
 class IsolatedRuntimeUnavailableError(IsolatedRuntimeError):
+    pass
+
+
+class IsolatedRuntimePolicyDeniedError(
+    IsolatedRuntimeError
+):
+    pass
+
+
+class IsolatedRuntimePolicyApprovalRequiredError(
+    IsolatedRuntimeError
+):
     pass
 
 
@@ -85,10 +101,17 @@ class IsolatedRuntimeService:
         sandbox: CodeSandboxService,
         docker_executable: str | None = None,
         runner: Callable[..., subprocess.CompletedProcess] | None = None,
+        runtime_policy: IsolatedRuntimePolicy | None = None,
     ) -> None:
         self._session = session
         self._event_bus = event_bus
         self._sandbox = sandbox
+        self._runtime_policy = (
+            runtime_policy
+            or IsolatedRuntimePolicy(
+                event_bus=event_bus,
+            )
+        )
         self._docker = docker_executable or shutil.which("docker") or "docker"
         self._runner = runner or subprocess.run
         root = os.getenv("AI_STUDIO_ISOLATED_RUNTIME_ROOT", "").strip()
@@ -166,16 +189,34 @@ class IsolatedRuntimeService:
         items: list[CodeSandboxVerificationItem] = []
         runs: list[IsolatedRuntimeRun] = []
         for profile in request.profiles:
+            policy_evaluation = (
+                await self._runtime_policy.evaluate_profile(
+                    workspace_id=workspace_id,
+                    profile=profile,
+                )
+            )
+            self._require_policy_allowed(
+                policy_evaluation,
+                subject=f"runtime profile {profile}",
+            )
+
             if profile == "diff_check":
-                item = self._sandbox.run_safe_verification_profile("diff_check", worktree, Path(sandbox.repo_path), request.timeout_seconds)
+                item = self._sandbox.run_safe_verification_profile(
+                    "diff_check",
+                    worktree,
+                    Path(sandbox.repo_path),
+                    request.timeout_seconds,
+                )
                 items.append(item)
                 continue
+
             run, item = await self._run_profile(
                 sandbox=sandbox,
                 worktree=worktree,
                 workspace_id=workspace_id,
                 profile=profile,
                 request=request,
+                policy_evaluation=policy_evaluation,
             )
             runs.append(run)
             items.append(item)
@@ -195,7 +236,21 @@ class IsolatedRuntimeService:
         row = self._session.scalar(stmt)
         return self._to_schema(row) if row else None
 
-    def artifact_zip_path(self, run_id: str, workspace_id: str | None) -> Path:
+    async def artifact_zip_path(
+        self,
+        run_id: str,
+        workspace_id: str | None,
+    ) -> Path:
+        policy_evaluation = (
+            await self._runtime_policy.evaluate_artifact_export(
+                workspace_id=workspace_id,
+            )
+        )
+        self._require_policy_allowed(
+            policy_evaluation,
+            subject="runtime artifact export",
+        )
+
         row = self._require_row(run_id, workspace_id)
         path_text = (row.metadata_json or {}).get("artifact_zip_path")
         if not path_text:
@@ -213,12 +268,12 @@ class IsolatedRuntimeService:
         workspace_id: str | None,
         profile: str,
         request: IsolatedRuntimeRunRequest,
+        policy_evaluation: RuntimePolicyEvaluation,
     ) -> tuple[IsolatedRuntimeRun, CodeSandboxVerificationItem]:
         spec = PROFILE_SPECS.get(profile)
         if spec is None:
             raise IsolatedRuntimeError(f"Профиль {profile} не поддерживается isolated runtime.")
         image = os.getenv(spec.image_env, spec.default_image).strip() or spec.default_image
-        present, image_id, trusted = self._image_status(image)
         now = utc_now()
         row = CodeSandboxRuntimeRunModel(
             id=f"runtime_{uuid.uuid4().hex}",
@@ -228,7 +283,7 @@ class IsolatedRuntimeService:
             backend="docker",
             status="running",
             image=image,
-            image_id=image_id,
+            image_id=None,
             network_mode="none",
             cpu_limit=request.cpu_limit,
             memory_mb=request.memory_mb,
@@ -237,14 +292,81 @@ class IsolatedRuntimeService:
             artifact_paths_json=[],
             artifact_bytes=0,
             output="",
-            metadata_json={},
+            metadata_json={
+                "runtime_policy": (
+                    policy_evaluation.to_dict()
+                ),
+            },
             created_at=now,
             started_at=now,
             updated_at=now,
         )
         self._session.add(row)
         self._session.flush()
-        await self._publish("code_sandbox.runtime.started", row, {"profile": profile, "image": image})
+
+        if (
+            request.collect_artifacts
+            and spec.artifact_paths
+        ):
+            artifact_policy = (
+                await self._runtime_policy
+                .evaluate_artifact_export(
+                    workspace_id=workspace_id,
+                )
+            )
+
+            metadata = dict(
+                row.metadata_json or {}
+            )
+            metadata[
+                "artifact_export_policy"
+            ] = artifact_policy.to_dict()
+            row.metadata_json = metadata
+
+            if not artifact_policy.allowed:
+                row.status = "failed"
+                row.output = self._policy_message(
+                    artifact_policy,
+                    subject=(
+                        "runtime artifact export"
+                    ),
+                )
+                row.finished_at = utc_now()
+                row.updated_at = row.finished_at
+                self._session.flush()
+
+                await self._publish(
+                    "code_sandbox.runtime.failed",
+                    row,
+                    {
+                        "message": row.output,
+                        "artifact_export_policy": (
+                            artifact_policy.to_dict()
+                        ),
+                    },
+                )
+
+                return (
+                    self._to_schema(row),
+                    self._verification_item(row),
+                )
+
+        present, image_id, trusted = self._image_status(
+            image
+        )
+        row.image_id = image_id
+
+        await self._publish(
+            "code_sandbox.runtime.started",
+            row,
+            {
+                "profile": profile,
+                "image": image,
+                "runtime_policy": (
+                    policy_evaluation.to_dict()
+                ),
+            },
+        )
 
         if not present or not trusted:
             row.status = "failed"
@@ -294,7 +416,13 @@ class IsolatedRuntimeService:
                     row.artifact_paths_json = artifact_paths
                     row.artifact_bytes = artifact_bytes
                     if zip_path:
-                        row.metadata_json = {"artifact_zip_path": str(zip_path)}
+                        metadata = dict(
+                            row.metadata_json or {}
+                        )
+                        metadata[
+                            "artifact_zip_path"
+                        ] = str(zip_path)
+                        row.metadata_json = metadata
         except Exception as exc:
             row.status = "failed"
             row.output = self._trim_output(f"Isolated runtime error: {exc}")
@@ -430,6 +558,52 @@ class IsolatedRuntimeService:
             check=False,
             timeout=timeout,
             shell=False,
+        )
+
+    @staticmethod
+    def _policy_message(
+        evaluation: RuntimePolicyEvaluation,
+        *,
+        subject: str,
+    ) -> str:
+        reasons = ", ".join(
+            evaluation.reason_codes
+        ) or "UNSPECIFIED_POLICY_REASON"
+
+        if evaluation.approval_required:
+            return (
+                f"Policy approval required for "
+                f"{subject}: {reasons}"
+            )
+
+        return (
+            f"Policy denied {subject}: {reasons}"
+        )
+
+    @classmethod
+    def _require_policy_allowed(
+        cls,
+        evaluation: RuntimePolicyEvaluation,
+        *,
+        subject: str,
+    ) -> None:
+        if evaluation.allowed:
+            return
+
+        message = cls._policy_message(
+            evaluation,
+            subject=subject,
+        )
+
+        if evaluation.approval_required:
+            raise (
+                IsolatedRuntimePolicyApprovalRequiredError(
+                    message
+                )
+            )
+
+        raise IsolatedRuntimePolicyDeniedError(
+            message
         )
 
     @classmethod

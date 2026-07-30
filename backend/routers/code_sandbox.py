@@ -23,7 +23,11 @@ from backend.code_sandbox.schemas import (
     IsolatedRuntimeStatus,
 )
 from backend.code_sandbox.agent import CodeAgentService
-from backend.code_sandbox.runtime import IsolatedRuntimeService
+from backend.code_sandbox.runtime import (
+    IsolatedRuntimePolicyApprovalRequiredError,
+    IsolatedRuntimePolicyDeniedError,
+    IsolatedRuntimeService,
+)
 from backend.code_sandbox.service import (
     CodeSandboxApprovalInvalidError,
     CodeSandboxApprovalRequiredError,
@@ -44,6 +48,32 @@ def _workspace_id(request: Request, requested: str | None = None) -> str | None:
 
 
 def _translate(exc: CodeSandboxError) -> HTTPException:
+    if isinstance(
+        exc,
+        IsolatedRuntimePolicyApprovalRequiredError,
+    ):
+        return HTTPException(
+            status_code=428,
+            detail={
+                "code": (
+                    "RUNTIME_POLICY_APPROVAL_REQUIRED"
+                ),
+                "message": str(exc),
+            },
+        )
+
+    if isinstance(
+        exc,
+        IsolatedRuntimePolicyDeniedError,
+    ):
+        return HTTPException(
+            status_code=403,
+            detail={
+                "code": "RUNTIME_POLICY_DENIED",
+                "message": str(exc),
+            },
+        )
+
     if isinstance(exc, CodeSandboxApprovalRequiredError):
         return HTTPException(status_code=428, detail={"code": "CODE_PATCH_APPROVAL_REQUIRED", "message": str(exc)})
     if isinstance(exc, CodeSandboxApprovalInvalidError):
@@ -259,13 +289,16 @@ async def run_isolated_runtime(
 
 
 @router.get("/code-sandbox/runtime-runs/{run_id}/artifacts")
-def download_runtime_artifacts(
+async def download_runtime_artifacts(
     run_id: str,
     http_request: Request,
     service: IsolatedRuntimeService = Depends(get_isolated_runtime_service),
 ) -> Response:
     try:
-        path = service.artifact_zip_path(run_id, _workspace_id(http_request))
+        path = await service.artifact_zip_path(
+            run_id,
+            _workspace_id(http_request),
+        )
     except CodeSandboxError as exc:
         raise _translate(exc) from exc
     return Response(

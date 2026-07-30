@@ -5,9 +5,10 @@ import React, {
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
+import WorkspacePolicyPanel from "./WorkspacePolicyPanel";
 import "./styles.css";
 
-type View = "chat" | "council" | "gateway" | "sandbox";
+type View = "chat" | "council" | "gateway" | "sandbox" | "settings";
 type Mode = "universal" | "crypto" | "code" | "documents";
 type CouncilExecutionMode =
   | "solo"
@@ -588,7 +589,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "system",
-      text: "AI Studio Enterprise v0.14.0: Docker Isolated Runtime для безопасного выполнения недоверенного кода.",
+      text: "AI Studio Enterprise v0.15.0: fail-closed Runtime Policy для провайдеров, кода и артефактов.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -2143,7 +2144,7 @@ function App() {
         <div className="brand-mark">C</div>
         <div>
           <div className="logo">AI Studio</div>
-          <div className="version">Enterprise v0.14.0</div>
+          <div className="version">Enterprise v0.15.0</div>
         </div>
 
         <nav className="nav" aria-label="Разделы">
@@ -2183,9 +2184,12 @@ function App() {
             <span>06</span>
             Документы
           </button>
-          <button disabled>
+          <button
+            className={view === "settings" ? "active" : ""}
+            onClick={() => setView("settings")}
+          >
             <span>07</span>
-            Настройки
+            Политика
           </button>
         </nav>
 
@@ -3275,8 +3279,14 @@ function App() {
           </>
         ) : view === "gateway" ? (
           <GatewayPanel />
+        ) : view === "sandbox" ? (
+          <CodeSandboxPanel
+            suggestedCouncilRunId={
+              councilResult?.run_id ?? historyDetail?.run_id ?? ""
+            }
+          />
         ) : (
-          <CodeSandboxPanel suggestedCouncilRunId={councilResult?.run_id ?? historyDetail?.run_id ?? ""} />
+          <WorkspacePolicyPanel />
         )}
       </main>
     </div>

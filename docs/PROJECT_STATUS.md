@@ -1,7 +1,7 @@
 # AI Studio Enterprise — Project Status
 
-Текущий этап: **P2-010 — Docker Isolated Runtime**, реализован.
-Версия: **0.14.0 / P2-010**.
+Текущий этап: **P2-011 — Runtime Policy, Trust and Data Classification**, реализован.
+Версия: **0.15.0 / P2-011**.
 Alembic head: **`20260724_0052`**.
 
 ## Завершённый фундамент P1
@@ -29,6 +29,21 @@ Alembic приводила к пропуску семи core-таблиц. Те�
 - частичная схема отклоняется без изменения revision;
 - полный round trip миграций проверяется тестом;
 - актуальная metadata содержит 152 таблицы.
+
+## P2-011 — Runtime Policy, Trust and Data Classification
+
+- единый fail-closed policy engine выдаёт `allow`, `require_approval`,
+  `require_isolation` или `deny`;
+- каждое решение содержит reason codes и детерминированный SHA-256 fingerprint;
+- Workspace хранит data classification и provider trust map;
+- AI Gateway проверяет каждый primary/failover route до adapter и secret lease;
+- host разрешён только для metadata-only `diff_check`, исполняемый код проходит
+  Docker isolation;
+- restricted artifact export запрещён, confidential требует approval;
+- policy snapshot сохраняется в runtime metadata и audit events;
+- React UI позволяет управлять классификацией и trust tiers;
+- полный regression suite и frontend production build проходят;
+- Alembic head не изменился: `20260724_0052`.
 
 ## P2-008 — Council-to-Sandbox Agent Execution
 

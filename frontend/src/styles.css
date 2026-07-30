@@ -2109,3 +2109,211 @@ button {
 .runtime-run.failed, .runtime-run.timeout { border-color: rgba(240,128,128,.4); }
 .runtime-run a { font-size: 12px; }
 @media (max-width: 760px) { .runtime-control { grid-template-columns: 1fr; } }
+/* P2-011 Runtime Policy, Trust and Data Classification */
+.policy-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  gap: 18px;
+  padding: 24px;
+  overflow: auto;
+}
+
+.policy-workspace-panel {
+  align-self: start;
+  position: sticky;
+  top: 24px;
+}
+
+.policy-workspace-panel select,
+.policy-main select {
+  width: 100%;
+  border: 1px solid rgba(23, 38, 30, 0.14);
+  border-radius: 10px;
+  padding: 11px 12px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.policy-workspace-meta {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(23, 38, 30, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.policy-workspace-meta span,
+.policy-workspace-meta small {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.policy-effective-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.policy-effective-summary span {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid rgba(23, 38, 30, 0.1);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.policy-effective-summary strong {
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.policy-main {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.policy-classification-badge {
+  border: 1px solid rgba(23, 38, 30, 0.16);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.policy-classification-badge.public,
+.policy-classification-note.public {
+  border-color: rgba(66, 184, 131, 0.45);
+}
+
+.policy-classification-badge.internal,
+.policy-classification-note.internal {
+  border-color: rgba(74, 126, 176, 0.4);
+}
+
+.policy-classification-badge.confidential,
+.policy-classification-note.confidential {
+  border-color: rgba(235, 166, 54, 0.58);
+}
+
+.policy-classification-badge.restricted,
+.policy-classification-note.restricted {
+  border-color: rgba(199, 78, 72, 0.58);
+}
+
+.policy-classification-note {
+  display: grid;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid rgba(23, 38, 30, 0.14);
+  border-left-width: 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.policy-classification-note span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.policy-trust-list {
+  display: grid;
+  gap: 9px;
+}
+
+.policy-trust-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);
+  gap: 16px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(23, 38, 30, 0.12);
+  border-left-width: 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.policy-trust-row.local {
+  border-left-color: rgba(66, 184, 131, 0.72);
+}
+
+.policy-trust-row.trusted_external {
+  border-left-color: rgba(74, 126, 176, 0.72);
+}
+
+.policy-trust-row.external {
+  border-left-color: rgba(235, 166, 54, 0.72);
+}
+
+.policy-trust-row.blocked {
+  border-left-color: rgba(199, 78, 72, 0.72);
+}
+
+.policy-trust-row > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.policy-trust-row strong {
+  overflow-wrap: anywhere;
+}
+
+.policy-trust-row small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.policy-enforcement-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.policy-enforcement-grid span {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid rgba(23, 38, 30, 0.11);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.policy-enforcement-grid strong {
+  color: var(--text);
+}
+
+.policy-enforcement-panel .sandbox-actions .secondary {
+  color: #4d5e53;
+  background: #e9eee9;
+}
+
+@media (max-width: 980px) {
+  .policy-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .policy-workspace-panel {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .policy-layout {
+    padding: 16px;
+  }
+
+  .policy-trust-row,
+  .policy-enforcement-grid {
+    grid-template-columns: 1fr;
+  }
+}
