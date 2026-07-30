@@ -5,7 +5,7 @@
 после чего председатель формирует общий вывод, консенсус, разногласия,
 рекомендации и оценку уверенности.
 
-Текущая версия: **v0.14.0 / P2-010**.
+Текущая версия: **v0.15.0 / P2-011**.
 Alembic head: `20260724_0052`.
 
 ## Что уже работает
@@ -15,6 +15,8 @@ Alembic head: `20260724_0052`.
 - OpenRouter + SVRTR/SaveRouter через универсальный OpenAI-compatible adapter;
 - provider health, persisted reliability/latency, circuit breaker и явный failover;
 - intelligent routing по quality/cost/latency/reliability;
+- fail-closed Runtime Policy для каждого primary/failover route до adapter и secret injection;
+- Workspace data classification и provider trust tiers с отдельным разделом «Политика»;
 - AI Council с режимами Solo / Council / Best-of-N / Review / Arbitration / Delegate;
 - Solo использует ровно одну модель; остальные коллективные режимы — 2–6 участников;
 - независимые Reviewer и Arbiter для проверяемого review/arbitration;
@@ -36,7 +38,8 @@ Alembic head: `20260724_0052`.
 - Code Sandbox на detached Git worktree: основной working tree не меняется во время работы агента;
 - SHA-256 patch fingerprint, risk classification, protected/blocked paths и 10 MiB patch cap;
 - Git config scope hardening: repo-local/worktree executable filters запрещены, global Git LFS не вызывает ложный BLOCK, `core.fsmonitor` принудительно отключён;
-- verification-профили `diff_check`, изолированный `python_compile`, opt-in `pytest` и frontend build;
+- verification-профили `diff_check`, изолированный `python_compile`, `pytest` и frontend build;
+- runtime policy snapshots, fail-closed artifact export controls и повторная проверка перед выдачей ZIP;
 - одноразовый Human Approval для protected/high-risk патчей и safe apply без автоматического commit;
 - совместимость существующих Workspace policy с прежними starter-моделями;
 - Workspace, проекты, память, настройки и каталог моделей;

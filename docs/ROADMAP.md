@@ -1,7 +1,7 @@
 # AI Studio Enterprise — Roadmap
 
-Версия плана: **0.14.0**
-Дата обновления: **2026-07-24**
+Версия плана: **0.15.0**
+Дата обновления: **2026-07-30**
 
 ## Phase 1 — Enterprise Core
 
@@ -117,6 +117,17 @@
 - disposable tmpfs execution environment для pytest/build;
 - evidence/artifact collection без writable host mount.
 
+
+### P2-011 — Runtime Policy, Trust and Data Classification
+
+Статус: **реализован в v0.15.0**.
+
+- Workspace data classification и provider trust tiers;
+- deterministic fail-closed policy engine с reason codes/fingerprint;
+- enforcement каждого AI Gateway primary/failover route;
+- host metadata validation и обязательный isolated runtime для кода;
+- artifact export controls и runtime policy audit snapshots;
+- Workspace Policy UI и release verification.
 
 ## Phase 3 — Additional Workspaces
 
