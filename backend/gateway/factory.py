@@ -7,11 +7,20 @@ from backend.core.config import AppSettings
 from backend.core.events import EventBus
 from backend.database.session import session_scope
 from backend.gateway.health import provider_health
+from backend.gateway.policy import GatewayRoutePolicy
 from backend.gateway.providers.openai_compatible import OpenAICompatibleAdapter
 from backend.gateway.providers.openrouter import OpenRouterAdapter
 from backend.gateway.routing import GatewayRoutingService, RoutingRequirements
 from backend.gateway.service import AIGateway
+from backend.repositories.models import ModelRepository
+from backend.repositories.settings import SettingsRepository
+from backend.repositories.workspaces import WorkspaceRepository
+from backend.runtime_policy import (
+    DataClassification,
+    ProviderTrust,
+)
 from backend.secrets.service import SecretManagerService
+from backend.services.workspace_policy import WorkspacePolicyService
 
 
 def _truthy(name: str, default: bool = False) -> bool:
@@ -121,6 +130,39 @@ def build_ai_gateway(
             # statistics/catalog tables are not ready yet.
             fallback_routes.setdefault("auto", [])
 
+    def resolve_provider_policy(
+        workspace_id: str | None,
+        provider: str,
+    ) -> tuple[DataClassification, ProviderTrust]:
+        if workspace_id is None:
+            return (
+                DataClassification.INTERNAL,
+                ProviderTrust.EXTERNAL,
+            )
+
+        with session_scope() as session:
+            policy = WorkspacePolicyService(
+                workspace_repository=WorkspaceRepository(
+                    session
+                ),
+                settings_repository=SettingsRepository(
+                    session
+                ),
+                model_repository=ModelRepository(session),
+                event_bus=event_bus,
+                app_settings=settings,
+            ).get_effective_policy(workspace_id)
+
+            return (
+                policy.data_classification,
+                policy.provider_trust_for(provider),
+            )
+
+    route_policy = GatewayRoutePolicy(
+        event_bus=event_bus,
+        resolver=resolve_provider_policy,
+    )
+
     return AIGateway(
         settings=settings,
         event_bus=event_bus,
@@ -130,4 +172,5 @@ def build_ai_gateway(
         provider_factories=provider_factories,
         fallback_routes=fallback_routes,
         health_service=provider_health,
+        route_policy=route_policy,
     )

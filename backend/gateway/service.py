@@ -9,6 +9,7 @@ from backend.core.config import AppSettings
 from backend.core.events import Event, EventBus
 from backend.core.logging import LoggerManager
 from backend.gateway.health import ProviderHealthService, TransientProviderHealthService
+from backend.gateway.policy import GatewayRoutePolicy
 from backend.gateway.providers.base import ProviderAdapter, ProviderStreamCancelled
 from backend.gateway.schemas import (
     GatewayError,
@@ -46,6 +47,7 @@ class AIGateway:
         provider_factories: dict[str, ProviderFactory] | None = None,
         fallback_routes: dict[str, list[Route]] | None = None,
         health_service: ProviderHealthService | None = None,
+        route_policy: GatewayRoutePolicy | None = None,
     ) -> None:
         self._settings = settings
         self._event_bus = event_bus
@@ -57,6 +59,9 @@ class AIGateway:
             key: list(value) for key, value in (fallback_routes or {}).items()
         }
         self._health = health_service or TransientProviderHealthService()
+        self._route_policy = route_policy or GatewayRoutePolicy(
+            event_bus=event_bus,
+        )
         self._logger = LoggerManager.get_logger("ai")
 
     def configured_providers(self) -> list[str]:
@@ -132,6 +137,26 @@ class AIGateway:
             response,
             content=accessor.redact_text(response.content),
             error=safe_error,
+        )
+
+    @staticmethod
+    def _attach_runtime_policy(
+        response: GatewayResponse,
+        request: GatewayRequest,
+    ) -> GatewayResponse:
+        policy_metadata = request.metadata.get(
+            "runtime_policy"
+        )
+
+        if not isinstance(policy_metadata, dict):
+            return response
+
+        return replace(
+            response,
+            metadata={
+                **response.metadata,
+                "runtime_policy": policy_metadata,
+            },
         )
 
     def _circuit_available(self, provider: str) -> bool:
@@ -307,6 +332,14 @@ class AIGateway:
                 )
                 continue
 
+            request, policy_rejection = (
+                await self._route_policy.evaluate(request)
+            )
+
+            if policy_rejection is not None:
+                last_response = policy_rejection
+                break
+
             adapter: ProviderAdapter | None = None
             accessor: SecretLeaseAccessor | None = None
             try:
@@ -342,6 +375,7 @@ class AIGateway:
                 )
                 response = await asyncio.to_thread(adapter.complete, request)
                 response = self._redact_response(response, accessor)
+                response = self._attach_runtime_policy(response, request)
             finally:
                 if accessor is not None:
                     await accessor.close()
@@ -491,6 +525,15 @@ class AIGateway:
             )
             if not self._circuit_available(route_provider):
                 continue
+
+            request, policy_rejection = (
+                await self._route_policy.evaluate(request)
+            )
+
+            if policy_rejection is not None:
+                last_response = policy_rejection
+                break
+
             adapter = None
             accessor = None
             attempt_emitted = False
@@ -518,6 +561,7 @@ class AIGateway:
                     cancellation_check,
                 )
                 response = self._redact_response(response, accessor)
+                response = self._attach_runtime_policy(response, request)
             finally:
                 if accessor is not None:
                     await accessor.close()
