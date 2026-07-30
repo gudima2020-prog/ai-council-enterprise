@@ -30,6 +30,7 @@ class RuntimeTrust(StrEnum):
 class PolicyOperation(StrEnum):
     MODEL_INFERENCE = "model_inference"
     CODE_EXECUTION = "code_execution"
+    METADATA_VALIDATION = "metadata_validation"
     ARTIFACT_EXPORT = "artifact_export"
 
 
@@ -89,6 +90,16 @@ class RuntimePolicyEngine:
 
         if context.operation == PolicyOperation.CODE_EXECUTION:
             return self._evaluate_code_execution(context)
+
+        if (
+            context.operation
+            == PolicyOperation.METADATA_VALIDATION
+        ):
+            return self._decision(
+                context,
+                PolicyAction.ALLOW,
+                "HOST_METADATA_VALIDATION_ALLOWED",
+            )
 
         if context.operation == PolicyOperation.ARTIFACT_EXPORT:
             return self._evaluate_artifact_export(context)
