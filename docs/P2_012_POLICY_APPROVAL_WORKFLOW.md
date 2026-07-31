@@ -107,3 +107,28 @@ P2-012 не заменяет эти механизмы автоматическ�
 - события содержат только безопасный approval summary.
 
 API routes будут подключены в P2-012.2b.
+
+## P2-012.2b — Policy Approval REST API
+
+The policy approval workflow is exposed through Workspace-scoped routes under
+`/api/workspaces/{workspace_id}/policy-approvals`.
+
+The API supports request, list, get, approve, deny, revoke, expiry
+reconciliation and immutable evidence retrieval. Runtime token consumption is
+deliberately not exposed as a public route; gateway and artifact enforcement
+consume the one-time capability internally in later P2-012 phases.
+
+Human Control permissions are reused instead of introducing a parallel RBAC
+system:
+
+- view and get: `human_control.view`;
+- request: `human_control.approval.initiate`;
+- approve and deny: `human_control.approval.vote`;
+- revoke and expiry reconciliation: `human_control.override`;
+- evidence: `human_control.audit`.
+
+Authenticated actor and Workspace bindings are authoritative. A request cannot
+supply a different actor or cross into another Workspace. The approval token is
+returned only by the successful approve response and is never returned by get,
+list or evidence endpoints. API scope and metadata payloads reject common raw
+secret, prompt, response and token fields.
