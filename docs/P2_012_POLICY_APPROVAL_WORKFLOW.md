@@ -132,3 +132,22 @@ supply a different actor or cross into another Workspace. The approval token is
 returned only by the successful approve response and is never returned by get,
 list or evidence endpoints. API scope and metadata payloads reject common raw
 secret, prompt, response and token fields.
+
+## P2-012.3a — Gateway Approval Coordinator and Atomic Consume
+
+This subphase adds the gateway-specific approval coordinator before it is wired
+into the provider execution loop.
+
+The coordinator builds `gateway_route` subjects from the original gateway
+`request_id`, provider, model and a SHA-256 fingerprint of normalized inference
+parameters. Message content is represented only by per-message SHA-256 hashes;
+raw prompts are not persisted.
+
+Policy approval consumption now uses database compare-and-set semantics. The
+update succeeds only while the same record remains approved, unexpired and
+bound to the expected token hash, policy fingerprint and scope fingerprint.
+A stale concurrent session receives a fail-closed state error and cannot
+authorize a second external inference.
+
+P2-012.3b will connect the coordinator to both normal and streaming AI Gateway
+execution before secret resolution and provider adapter construction.

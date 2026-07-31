@@ -15,7 +15,9 @@ from backend.policy_approvals.core import (
     PolicyApprovalGrant,
     PolicyApprovalRecord,
     PolicyApprovalScope,
+    PolicyApprovalStateError,
     PolicyApprovalStatus,
+    PolicyApprovalTokenError,
 )
 from backend.policy_approvals.repository import PolicyApprovalRepository
 from backend.runtime_policy import PolicyOperation
@@ -258,18 +260,56 @@ class PolicyApprovalService:
         now: datetime | None = None,
     ) -> PolicyApprovalRecord:
         row = self._require_row(approval_id, workspace_id)
+        current_time = now or utc_now()
+        current_record = self._repository.to_record(row)
+
         try:
             record = PolicyApprovalCore.consume(
-                self._repository.to_record(row),
+                current_record,
                 token=token,
                 scope=scope,
-                now=now or utc_now(),
+                now=current_time,
             )
         except PolicyApprovalExpiredError as exc:
             await self._persist_expired_exception(row, exc)
             raise
 
-        self._repository.save(row, record)
+        if current_record.token_hash is None:
+            raise PolicyApprovalTokenError(
+                "Policy approval token hash is missing."
+            )
+
+        consumed = self._repository.consume_if_approved(
+            approval_id=approval_id,
+            workspace_id=workspace_id,
+            token_hash=current_record.token_hash,
+            policy_fingerprint=(
+                current_record.scope.policy_fingerprint
+            ),
+            scope_fingerprint=(
+                current_record.scope_fingerprint
+            ),
+            consumed_at=(
+                record.consumed_at or current_time
+            ),
+        )
+        if not consumed:
+            self._session.expire_all()
+            latest_row = self._repository.get(
+                approval_id,
+                workspace_id,
+            )
+            latest_record = (
+                self._repository.to_record(latest_row)
+                if latest_row is not None
+                else None
+            )
+            raise PolicyApprovalStateError(
+                "Policy approval changed concurrently and "
+                "cannot be consumed.",
+                record=latest_record,
+            )
+
         self._repository.append_evidence(
             record=record,
             event_type="consumed",
@@ -282,7 +322,10 @@ class PolicyApprovalService:
             },
             occurred_at=record.consumed_at,
         )
-        await self._publish("policy_approval.consumed", record)
+        await self._publish(
+            "policy_approval.consumed",
+            record,
+        )
         return record
 
     async def reconcile_expired(

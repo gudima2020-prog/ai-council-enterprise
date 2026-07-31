@@ -6,7 +6,7 @@ import hmac
 import json
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from backend.policy_approvals.core import (
@@ -149,6 +149,42 @@ class PolicyApprovalRepository:
                 PolicyApprovalModel.workspace_id == workspace_id,
             )
         )
+
+    def consume_if_approved(
+        self,
+        *,
+        approval_id: str,
+        workspace_id: str,
+        token_hash: str,
+        policy_fingerprint: str,
+        scope_fingerprint: str,
+        consumed_at: datetime,
+    ) -> bool:
+        result = self._session.execute(
+            update(PolicyApprovalModel)
+            .where(
+                PolicyApprovalModel.id == approval_id,
+                PolicyApprovalModel.workspace_id == workspace_id,
+                PolicyApprovalModel.status
+                == PolicyApprovalStatus.APPROVED.value,
+                PolicyApprovalModel.token_hash == token_hash,
+                PolicyApprovalModel.policy_fingerprint
+                == policy_fingerprint,
+                PolicyApprovalModel.scope_fingerprint
+                == scope_fingerprint,
+                PolicyApprovalModel.expires_at > consumed_at,
+            )
+            .values(
+                status=PolicyApprovalStatus.CONSUMED.value,
+                consumed_at=consumed_at,
+                updated_at=consumed_at,
+            ),
+            execution_options={
+                "synchronize_session": False,
+            },
+        )
+        self._session.flush()
+        return result.rowcount == 1
 
     def find_active(
         self,
