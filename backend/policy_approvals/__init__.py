@@ -14,6 +14,18 @@ from backend.policy_approvals.core import (
     PolicyApprovalStatus,
     PolicyApprovalTokenError,
 )
+from backend.policy_approvals.models import (
+    PolicyApprovalEvidenceModel,
+    PolicyApprovalModel,
+)
+from backend.policy_approvals.repository import PolicyApprovalRepository
+from backend.policy_approvals.service import (
+    PolicyApprovalNotFoundError,
+    PolicyApprovalRequestResult,
+    PolicyApprovalService,
+    PolicyApprovalServiceError,
+    PolicyApprovalWorkspaceError,
+)
 
 __all__ = [
     "DEFAULT_POLICY_APPROVAL_TTL_SECONDS",
@@ -22,12 +34,20 @@ __all__ = [
     "PolicyApprovalCore",
     "PolicyApprovalDecision",
     "PolicyApprovalError",
+    "PolicyApprovalEvidenceModel",
     "PolicyApprovalExpiredError",
     "PolicyApprovalGrant",
+    "PolicyApprovalModel",
+    "PolicyApprovalNotFoundError",
     "PolicyApprovalRecord",
+    "PolicyApprovalRepository",
+    "PolicyApprovalRequestResult",
     "PolicyApprovalScope",
     "PolicyApprovalScopeError",
+    "PolicyApprovalService",
+    "PolicyApprovalServiceError",
     "PolicyApprovalStateError",
     "PolicyApprovalStatus",
     "PolicyApprovalTokenError",
+    "PolicyApprovalWorkspaceError",
 ]

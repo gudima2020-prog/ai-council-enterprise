@@ -91,3 +91,19 @@ P2-012 не заменяет эти механизмы автоматическ�
 - evidence, reason codes, TTL и exact subject preview;
 - approve/deny/revoke;
 - regression, documentation и release verification.
+
+## P2-012.2a — Persistence and Decision Evidence
+
+Реализованы:
+
+- Alembic revision `20260731_0053`;
+- Workspace-isolated таблица `policy_approvals`;
+- append-only глобальная SHA-256 hash chain `policy_approval_evidence`;
+- repository mapping между SQLAlchemy и P2-012.1 domain records;
+- idempotent active-scope request;
+- approve, deny, revoke, consume и expiry reconciliation;
+- raw approval token возвращается только из approve и никогда не сохраняется;
+- evidence отклоняет ключи, похожие на token, secret, prompt, response или raw content;
+- события содержат только безопасный approval summary.
+
+API routes будут подключены в P2-012.2b.
