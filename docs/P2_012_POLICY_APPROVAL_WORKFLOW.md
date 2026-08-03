@@ -151,3 +151,18 @@ authorize a second external inference.
 
 P2-012.3b will connect the coordinator to both normal and streaming AI Gateway
 execution before secret resolution and provider adapter construction.
+
+
+## P2-012.3b — AI Gateway Enforcement
+
+The AI Gateway creates or reuses an exact Workspace-scoped approval request
+for each concrete provider/model route that requires human approval. The
+caller resumes the same gateway request with its stable request id, approval
+id and one-time token.
+
+The token is never stored in request metadata, response metadata, events or
+logs. It is atomically consumed only after an adapter is available and
+immediately before non-streaming inference or a streaming provider call.
+Failover candidates are evaluated independently, so an approval for one
+provider/model route cannot authorize another route. Streaming emits no
+content before successful consumption.

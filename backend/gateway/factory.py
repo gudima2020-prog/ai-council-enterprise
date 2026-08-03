@@ -6,6 +6,7 @@ import os
 from backend.core.config import AppSettings
 from backend.core.events import EventBus
 from backend.database.session import session_scope
+from backend.gateway.approvals import GatewayApprovalCoordinator
 from backend.gateway.health import provider_health
 from backend.gateway.policy import GatewayRoutePolicy
 from backend.gateway.providers.openai_compatible import OpenAICompatibleAdapter
@@ -173,4 +174,8 @@ def build_ai_gateway(
         fallback_routes=fallback_routes,
         health_service=provider_health,
         route_policy=route_policy,
+        approval_coordinator=GatewayApprovalCoordinator(
+            session_scope_factory=session_scope,
+            event_bus=event_bus,
+        ),
     )
