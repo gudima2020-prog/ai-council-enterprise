@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+)
+from pydantic import SecretStr
 from fastapi.responses import Response
 
 from backend.api.dependencies import get_code_agent_service, get_code_sandbox_service, get_isolated_runtime_service
@@ -24,6 +32,8 @@ from backend.code_sandbox.schemas import (
 )
 from backend.code_sandbox.agent import CodeAgentService
 from backend.code_sandbox.runtime import (
+    IsolatedRuntimeArtifactApprovalRejectedError,
+    IsolatedRuntimeArtifactApprovalRequiredError,
     IsolatedRuntimePolicyApprovalRequiredError,
     IsolatedRuntimePolicyDeniedError,
     IsolatedRuntimeService,
@@ -48,6 +58,32 @@ def _workspace_id(request: Request, requested: str | None = None) -> str | None:
 
 
 def _translate(exc: CodeSandboxError) -> HTTPException:
+    if isinstance(
+        exc,
+        IsolatedRuntimeArtifactApprovalRequiredError,
+    ):
+        return HTTPException(
+            status_code=202,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "policy_approval": dict(exc.metadata),
+            },
+        )
+
+    if isinstance(
+        exc,
+        IsolatedRuntimeArtifactApprovalRejectedError,
+    ):
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "policy_approval": dict(exc.metadata),
+            },
+        )
+
     if isinstance(
         exc,
         IsolatedRuntimePolicyApprovalRequiredError,
@@ -292,19 +328,47 @@ async def run_isolated_runtime(
 async def download_runtime_artifacts(
     run_id: str,
     http_request: Request,
-    service: IsolatedRuntimeService = Depends(get_isolated_runtime_service),
+    approval_id: str | None = Header(
+        default=None,
+        alias="X-Policy-Approval-ID",
+    ),
+    approval_token: SecretStr | None = Header(
+        default=None,
+        alias="X-Policy-Approval-Token",
+    ),
+    service: IsolatedRuntimeService = Depends(
+        get_isolated_runtime_service
+    ),
 ) -> Response:
     try:
-        path = await service.artifact_zip_path(
+        export = await service.artifact_zip_bytes(
             run_id,
             _workspace_id(http_request),
+            approval_id=approval_id,
+            approval_token=(
+                approval_token.get_secret_value()
+                if approval_token is not None
+                else None
+            ),
+            requested_by="runtime-artifact-download",
         )
     except CodeSandboxError as exc:
         raise _translate(exc) from exc
     return Response(
-        content=path.read_bytes(),
+        content=export.content,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{run_id}-artifacts.zip"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="'
+                f'{run_id}-artifacts.zip"'
+            ),
+            "X-Runtime-Artifact-Policy": str(
+                export.metadata.get(
+                    "policy_action",
+                    "unknown",
+                )
+            ),
+        },
     )
 
 

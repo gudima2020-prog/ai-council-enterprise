@@ -200,3 +200,21 @@ the original capability token.
 
 The next subphase wires this coordinator into runtime artifact download with a
 fresh policy evaluation immediately before token consumption and byte release.
+
+## P2-012.4c — Runtime Artifact Download Enforcement
+
+Runtime artifact download now performs a fresh artifact-export policy
+evaluation for every request. Confidential exports create or reuse an exact
+approval request bound to the current ZIP SHA-256, manifest fingerprint,
+Workspace, runtime run, sandbox session, profile and policy fingerprint.
+
+The approval id and one-time token are accepted only through
+`X-Policy-Approval-ID` and `X-Policy-Approval-Token` headers, not query
+parameters. The token is consumed atomically before the final ZIP read and
+byte release. The service then recomputes the descriptor; any post-consume
+file change fails closed and releases no bytes.
+
+Denied policy decisions, incomplete credentials, invalid or reused tokens,
+expired approvals, scope changes and cross-Workspace attempts never return
+artifact content. Pending and rejected responses contain only sanitized
+approval metadata.

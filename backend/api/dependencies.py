@@ -6,6 +6,9 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from backend.core.container import AppContainer
+from backend.code_sandbox.artifact_approvals import (
+    RuntimeArtifactApprovalCoordinator,
+)
 from backend.code_sandbox.service import CodeSandboxService
 from backend.code_sandbox.agent import CodeAgentService
 from backend.code_sandbox.runtime import IsolatedRuntimeService
@@ -157,6 +160,12 @@ def get_isolated_runtime_service(
         event_bus=container.event_bus,
         sandbox=sandbox,
         runtime_policy=runtime_policy,
+        artifact_approval_coordinator=(
+            RuntimeArtifactApprovalCoordinator(
+                session_scope_factory=session_scope,
+                event_bus=container.event_bus,
+            )
+        ),
     )
 
 
