@@ -166,3 +166,21 @@ immediately before non-streaming inference or a streaming provider call.
 Failover candidates are evaluated independently, so an approval for one
 provider/model route cannot authorize another route. Streaming emits no
 content before successful consumption.
+
+## P2-012.4a — Approval-aware Gateway API
+
+`POST /api/workspaces/{workspace_id}/gateway/inference` exposes the exact
+approval workflow without weakening Workspace or operator binding. The first
+request returns HTTP 202 with `POLICY_APPROVAL_REQUIRED` and a persisted
+approval id. After the approval API returns its one-time token, the caller
+repeats the same prompt, route and request id with the approval id and token.
+
+The API derives the actor from the authenticated Human Control principal,
+never accepts an actor override, never returns the approval token, and maps
+approval failures to explicit fail-closed HTTP statuses. Raw prompts and
+one-time tokens are excluded from approval metadata, public records and the
+evidence chain.
+
+End-to-end tests exercise API request, operator approval, atomic token
+consumption, provider invocation, evidence persistence, token reuse,
+scope mismatch, partial credentials and cross-Workspace isolation.

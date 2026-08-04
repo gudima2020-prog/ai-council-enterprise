@@ -3,17 +3,33 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Response
+from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy.orm import Session
 
-from backend.api.dependencies import get_container, get_db_session
+from backend.api.dependencies import (
+    get_ai_gateway,
+    get_container,
+    get_db_session,
+)
+from backend.control_center.governance_schemas import (
+    HumanControlPermission,
+)
+from backend.control_center.security import (
+    HumanControlPrincipal,
+    HumanControlSecurityError,
+    enforce_workspace_value,
+    require_permission,
+    security_http_exception,
+)
 from backend.core.config import get_settings
 from backend.core.container import AppContainer
 from backend.core.events import event_bus
 from backend.gateway.factory import build_ai_gateway
 from backend.gateway.health import provider_health
 from backend.gateway.prompts import get_system_prompt
+from backend.gateway.schemas import GatewayResponse
+from backend.gateway.service import AIGateway
 from backend.gateway.routing import GatewayRoutingService, RoutingRequirements
 
 router = APIRouter(tags=["gateway"])
@@ -27,6 +43,90 @@ class GatewayRouteRequest(BaseModel):
     expected_input_tokens: int = Field(default=2000, ge=0, le=10_000_000)
     expected_output_tokens: int = Field(default=1000, ge=0, le=1_000_000)
     limit: int = Field(default=5, ge=1, le=20)
+
+
+class GatewayInferenceRequest(BaseModel):
+    user_prompt: str = Field(..., min_length=1, max_length=100_000)
+    mode: str = Field(default="universal", min_length=1, max_length=64)
+    provider: str | None = Field(default=None, min_length=1, max_length=128)
+    model: str | None = Field(default=None, min_length=1, max_length=255)
+    request_id: str | None = Field(default=None, min_length=1, max_length=255)
+    approval_id: str | None = Field(default=None, min_length=1, max_length=255)
+    approval_token: SecretStr | None = None
+    timeout_seconds: int | None = Field(default=None, ge=1, le=600)
+
+
+def _bound_gateway_workspace(
+    workspace_id: str,
+    principal: HumanControlPrincipal,
+) -> str:
+    try:
+        resolved = enforce_workspace_value(workspace_id, principal)
+    except HumanControlSecurityError as exc:
+        raise security_http_exception(exc) from exc
+    if not resolved:
+        raise ValueError("A Workspace is required.")
+    return resolved
+
+
+def _gateway_http_status(result: GatewayResponse) -> int:
+    if result.status == "success":
+        return 200
+    if result.error is None:
+        return 502
+    code = result.error.code
+    if code == "POLICY_APPROVAL_REQUIRED":
+        return 202
+    if code == "POLICY_APPROVAL_CREDENTIALS_INCOMPLETE":
+        return 400
+    if code == "POLICY_APPROVAL_NOT_FOUND":
+        return 404
+    if code in {
+        "POLICY_APPROVAL_TOKEN_INVALID",
+        "POLICY_APPROVAL_SCOPE_MISMATCH",
+        "POLICY_APPROVAL_WORKSPACE_INVALID",
+        "POLICY_DENIED",
+    }:
+        return 403
+    if code in {
+        "POLICY_APPROVAL_EXPIRED",
+        "POLICY_APPROVAL_INVALID_STATE",
+    }:
+        return 409
+    if code in {
+        "POLICY_APPROVAL_UNAVAILABLE",
+        "POLICY_APPROVAL_RESOLUTION_FAILED",
+        "POLICY_APPROVAL_CONSUME_FAILED",
+    }:
+        return 503
+    return 502
+
+
+def _gateway_response_payload(result: GatewayResponse) -> dict:
+    payload = {
+        "request_id": result.request_id,
+        "status": result.status,
+        "provider": result.provider,
+        "model": result.model,
+        "content": result.content,
+        "latency_ms": result.latency_ms,
+        "cost": result.cost,
+        "metadata": dict(result.metadata),
+        "usage": {
+            "input_tokens": result.usage.input_tokens,
+            "output_tokens": result.usage.output_tokens,
+            "total_tokens": result.usage.total_tokens,
+        },
+        "error": None,
+    }
+    if result.error is not None:
+        payload["error"] = {
+            "code": result.error.code,
+            "message": result.error.message,
+            "recoverable": result.error.recoverable,
+            "details": dict(result.error.details),
+        }
+    return payload
 
 
 def _provider_configuration() -> dict[str, dict]:
@@ -162,6 +262,41 @@ def gateway_route(
         "candidates": candidates,
         "selected": candidates[0] if candidates else None,
     }
+
+
+@router.post("/workspaces/{workspace_id}/gateway/inference")
+async def gateway_inference(
+    workspace_id: str,
+    request: GatewayInferenceRequest,
+    http_response: Response,
+    gateway: AIGateway = Depends(get_ai_gateway),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(HumanControlPermission.APPROVAL_INITIATE.value)
+    ),
+) -> dict:
+    workspace_id = _bound_gateway_workspace(workspace_id, principal)
+    actor_id = principal.actor_id or principal.identity_id or "gateway-api"
+    approval_token = (
+        request.approval_token.get_secret_value()
+        if request.approval_token is not None
+        else None
+    )
+    result = await gateway.ask(
+        user_prompt=request.user_prompt,
+        system_prompt=get_system_prompt(request.mode),
+        provider=request.provider,
+        model=request.model,
+        mode=request.mode,
+        source="gateway_api",
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        request_id=request.request_id,
+        approval_id=request.approval_id,
+        approval_token=approval_token,
+        timeout_seconds=request.timeout_seconds,
+    )
+    http_response.status_code = _gateway_http_status(result)
+    return _gateway_response_payload(result)
 
 
 @router.post("/gateway/test")

@@ -13,6 +13,7 @@ from backend.code_sandbox.runtime_policy import (
     IsolatedRuntimePolicy,
 )
 from backend.gateway.factory import build_ai_gateway
+from backend.gateway.service import AIGateway
 from backend.council.control import CouncilControlService
 from backend.council.history import CouncilHistoryService
 from backend.council.live import CouncilLiveManager
@@ -47,6 +48,16 @@ def get_policy_approval_service(
     return PolicyApprovalService(
         session=session,
         event_bus=container.event_bus,
+    )
+
+
+def get_ai_gateway(
+    container: AppContainer = Depends(get_container),
+) -> AIGateway:
+    return build_ai_gateway(
+        settings=container.settings,
+        event_bus=container.event_bus,
+        secret_manager=container.secret_manager_service,
     )
 
 
