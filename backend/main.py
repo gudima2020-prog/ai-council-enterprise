@@ -54,6 +54,7 @@ from backend.routers import (
     mission_strategies,
     models,
     plugins,
+    policy_approvals,
     repository,
     secrets,
     settings,
@@ -805,6 +806,7 @@ app.include_router(execution_transport.router, prefix="/api")
 app.include_router(gateway.router, prefix="/api")
 app.include_router(repository.router, prefix="/api")
 app.include_router(plugins.router, prefix="/api")
+app.include_router(policy_approvals.router, prefix="/api")
 app.include_router(secrets.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")

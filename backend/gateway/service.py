@@ -8,6 +8,10 @@ from inspect import isawaitable
 from backend.core.config import AppSettings
 from backend.core.events import Event, EventBus
 from backend.core.logging import LoggerManager
+from backend.gateway.approvals import (
+    GatewayApprovalCoordinator,
+    GatewayApprovalOutcome,
+)
 from backend.gateway.health import ProviderHealthService, TransientProviderHealthService
 from backend.gateway.policy import GatewayRoutePolicy
 from backend.gateway.providers.base import ProviderAdapter, ProviderStreamCancelled
@@ -16,6 +20,10 @@ from backend.gateway.schemas import (
     GatewayMessage,
     GatewayRequest,
     GatewayResponse,
+)
+from backend.runtime_policy import (
+    PolicyAction,
+    RuntimePolicyDecision,
 )
 from backend.secrets.injection import SecretLeaseAccessor, build_secret_accessor
 from backend.secrets.schemas import SecretResolveContext
@@ -48,6 +56,7 @@ class AIGateway:
         fallback_routes: dict[str, list[Route]] | None = None,
         health_service: ProviderHealthService | None = None,
         route_policy: GatewayRoutePolicy | None = None,
+        approval_coordinator: GatewayApprovalCoordinator | None = None,
     ) -> None:
         self._settings = settings
         self._event_bus = event_bus
@@ -62,6 +71,7 @@ class AIGateway:
         self._route_policy = route_policy or GatewayRoutePolicy(
             event_bus=event_bus,
         )
+        self._approval_coordinator = approval_coordinator
         self._logger = LoggerManager.get_logger("ai")
 
     def configured_providers(self) -> list[str]:
@@ -144,19 +154,191 @@ class AIGateway:
         response: GatewayResponse,
         request: GatewayRequest,
     ) -> GatewayResponse:
-        policy_metadata = request.metadata.get(
-            "runtime_policy"
-        )
+        metadata = dict(response.metadata)
+        changed = False
 
-        if not isinstance(policy_metadata, dict):
+        for key in ("runtime_policy", "policy_approval"):
+            value = request.metadata.get(key)
+            if isinstance(value, dict):
+                metadata[key] = dict(value)
+                changed = True
+
+        if not changed:
             return response
 
-        return replace(
-            response,
-            metadata={
-                **response.metadata,
-                "runtime_policy": policy_metadata,
-            },
+        return replace(response, metadata=metadata)
+
+    @staticmethod
+    def _runtime_policy_decision(
+        request: GatewayRequest,
+    ) -> RuntimePolicyDecision | None:
+        metadata = request.metadata.get("runtime_policy")
+        if not isinstance(metadata, dict):
+            return None
+        try:
+            action = PolicyAction(str(metadata["action"]))
+            policy_version = str(metadata["policy_version"])
+            fingerprint = str(metadata["fingerprint"])
+            reason_codes = tuple(
+                str(value)
+                for value in metadata["reason_codes"]
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        if not policy_version or not fingerprint:
+            return None
+
+        return RuntimePolicyDecision(
+            policy_version=policy_version,
+            action=action,
+            reason_codes=reason_codes,
+            fingerprint=fingerprint,
+        )
+
+    @staticmethod
+    def _approval_response(
+        request: GatewayRequest,
+        outcome: GatewayApprovalOutcome,
+    ) -> GatewayResponse:
+        approval_metadata = dict(outcome.metadata)
+        metadata: dict[str, object] = {
+            "policy_approval": approval_metadata,
+        }
+        runtime_policy = request.metadata.get("runtime_policy")
+        if isinstance(runtime_policy, dict):
+            metadata["runtime_policy"] = dict(runtime_policy)
+
+        return GatewayResponse(
+            request_id=request.request_id,
+            provider=request.provider,
+            model=request.model,
+            content="",
+            status="error",
+            error=GatewayError(
+                code=(
+                    outcome.error_code
+                    or "POLICY_APPROVAL_FAILED"
+                ),
+                message=(
+                    outcome.message
+                    or "The policy approval could not be verified."
+                ),
+                provider=request.provider,
+                recoverable=False,
+                details=dict(metadata),
+            ),
+            metadata=dict(metadata),
+        )
+
+    async def _prepare_route_approval(
+        self,
+        *,
+        request: GatewayRequest,
+        policy_rejection: GatewayResponse | None,
+        approval_id: str | None,
+        approval_token: str | None,
+        requested_by: str,
+    ) -> tuple[
+        bool,
+        RuntimePolicyDecision | None,
+        GatewayResponse | None,
+    ]:
+        if policy_rejection is None:
+            return False, None, None
+
+        if (
+            policy_rejection.error is None
+            or policy_rejection.error.code
+            != "POLICY_APPROVAL_REQUIRED"
+        ):
+            return False, None, policy_rejection
+
+        decision = self._runtime_policy_decision(request)
+        coordinator = self._approval_coordinator
+        if decision is None or coordinator is None:
+            return False, None, policy_rejection
+
+        has_id = bool(approval_id)
+        has_token = bool(approval_token)
+
+        if not has_id and not has_token:
+            outcome = await coordinator.request(
+                request=request,
+                decision=decision,
+                requested_by=requested_by,
+            )
+            return (
+                False,
+                None,
+                self._approval_response(request, outcome),
+            )
+
+        if not has_id or not has_token:
+            outcome = await coordinator.consume(
+                request=request,
+                decision=decision,
+                approval_id=approval_id or "",
+                token=approval_token or "",
+            )
+            return (
+                False,
+                None,
+                self._approval_response(request, outcome),
+            )
+
+        return True, decision, None
+
+    async def _consume_route_approval(
+        self,
+        *,
+        request: GatewayRequest,
+        decision: RuntimePolicyDecision,
+        approval_id: str,
+        approval_token: str,
+    ) -> tuple[GatewayRequest, GatewayResponse | None]:
+        coordinator = self._approval_coordinator
+        if coordinator is None:
+            return (
+                request,
+                GatewayResponse(
+                    request_id=request.request_id,
+                    provider=request.provider,
+                    model=request.model,
+                    content="",
+                    status="error",
+                    error=GatewayError(
+                        code="POLICY_APPROVAL_UNAVAILABLE",
+                        message=(
+                            "The policy approval service is unavailable."
+                        ),
+                        provider=request.provider,
+                        recoverable=False,
+                    ),
+                ),
+            )
+
+        outcome = await coordinator.consume(
+            request=request,
+            decision=decision,
+            approval_id=approval_id,
+            token=approval_token,
+        )
+        if not outcome.authorized:
+            return (
+                request,
+                self._approval_response(request, outcome),
+            )
+
+        return (
+            replace(
+                request,
+                metadata={
+                    **request.metadata,
+                    "policy_approval": dict(outcome.metadata),
+                },
+            ),
+            None,
         )
 
     def _circuit_available(self, provider: str) -> bool:
@@ -268,6 +450,9 @@ class AIGateway:
         correlation_id: str | None = None,
         workspace_id: str | None = None,
         actor_id: str | None = None,
+        request_id: str | None = None,
+        approval_id: str | None = None,
+        approval_token: str | None = None,
         timeout_seconds: int | None = None,
     ) -> GatewayResponse:
         selected_provider = provider or self._settings.default_provider
@@ -291,6 +476,14 @@ class AIGateway:
             workspace_id=workspace_id,
             correlation_id=correlation_id,
         )
+        if request_id is not None:
+            normalized_request_id = request_id.strip()
+            if not normalized_request_id:
+                raise ValueError("request_id cannot be empty.")
+            base_request = replace(
+                base_request,
+                request_id=normalized_request_id,
+            )
         routes = self._candidate_routes(selected_provider, selected_model)
         await self._event_bus.publish(
             Event(
@@ -335,6 +528,21 @@ class AIGateway:
             request, policy_rejection = (
                 await self._route_policy.evaluate(request)
             )
+            (
+                approval_pending,
+                approval_decision,
+                policy_rejection,
+            ) = await self._prepare_route_approval(
+                request=request,
+                policy_rejection=policy_rejection,
+                approval_id=approval_id,
+                approval_token=approval_token,
+                requested_by=(
+                    actor_id
+                    or source
+                    or "ai-gateway"
+                ),
+            )
 
             if policy_rejection is not None:
                 last_response = policy_rejection
@@ -365,6 +573,41 @@ class AIGateway:
                         ),
                     )
                     continue
+
+                if approval_pending:
+                    if (
+                        approval_decision is None
+                        or not approval_id
+                        or not approval_token
+                    ):
+                        last_response = GatewayResponse(
+                            request_id=request.request_id,
+                            provider=request.provider,
+                            model=request.model,
+                            content="",
+                            status="error",
+                            error=GatewayError(
+                                code="POLICY_APPROVAL_INVALID_STATE",
+                                message=(
+                                    "The policy approval state is incomplete."
+                                ),
+                                provider=request.provider,
+                                recoverable=False,
+                            ),
+                        )
+                        break
+                    (
+                        request,
+                        approval_rejection,
+                    ) = await self._consume_route_approval(
+                        request=request,
+                        decision=approval_decision,
+                        approval_id=approval_id,
+                        approval_token=approval_token,
+                    )
+                    if approval_rejection is not None:
+                        last_response = approval_rejection
+                        break
 
                 self._logger.info(
                     "AI request attempt request_id=%s attempt=%s provider=%s model=%s",
@@ -464,6 +707,9 @@ class AIGateway:
         correlation_id: str | None = None,
         workspace_id: str | None = None,
         actor_id: str | None = None,
+        request_id: str | None = None,
+        approval_id: str | None = None,
+        approval_token: str | None = None,
         timeout_seconds: int | None = None,
         cancellation_check: Callable[[], bool] | None = None,
     ) -> GatewayResponse:
@@ -488,6 +734,14 @@ class AIGateway:
             workspace_id=workspace_id,
             correlation_id=correlation_id,
         )
+        if request_id is not None:
+            normalized_request_id = request_id.strip()
+            if not normalized_request_id:
+                raise ValueError("request_id cannot be empty.")
+            base_request = replace(
+                base_request,
+                request_id=normalized_request_id,
+            )
         routes = self._candidate_routes(selected_provider, selected_model)
         await self._event_bus.publish(
             Event(
@@ -529,6 +783,21 @@ class AIGateway:
             request, policy_rejection = (
                 await self._route_policy.evaluate(request)
             )
+            (
+                approval_pending,
+                approval_decision,
+                policy_rejection,
+            ) = await self._prepare_route_approval(
+                request=request,
+                policy_rejection=policy_rejection,
+                approval_id=approval_id,
+                approval_token=approval_token,
+                requested_by=(
+                    actor_id
+                    or source
+                    or "ai-gateway"
+                ),
+            )
 
             if policy_rejection is not None:
                 last_response = policy_rejection
@@ -554,6 +823,40 @@ class AIGateway:
                 )
                 if adapter is None:
                     continue
+                if approval_pending:
+                    if (
+                        approval_decision is None
+                        or not approval_id
+                        or not approval_token
+                    ):
+                        last_response = GatewayResponse(
+                            request_id=request.request_id,
+                            provider=request.provider,
+                            model=request.model,
+                            content="",
+                            status="error",
+                            error=GatewayError(
+                                code="POLICY_APPROVAL_INVALID_STATE",
+                                message=(
+                                    "The policy approval state is incomplete."
+                                ),
+                                provider=request.provider,
+                                recoverable=False,
+                            ),
+                        )
+                        break
+                    (
+                        request,
+                        approval_rejection,
+                    ) = await self._consume_route_approval(
+                        request=request,
+                        decision=approval_decision,
+                        approval_id=approval_id,
+                        approval_token=approval_token,
+                    )
+                    if approval_rejection is not None:
+                        last_response = approval_rejection
+                        break
                 response = await asyncio.to_thread(
                     adapter.complete_stream,
                     request,

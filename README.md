@@ -5,8 +5,8 @@
 после чего председатель формирует общий вывод, консенсус, разногласия,
 рекомендации и оценку уверенности.
 
-Текущая версия: **v0.15.0 / P2-011**.
-Alembic head: `20260724_0052`.
+Текущая версия: **v0.16.0 / P2-012**.
+Alembic head: `20260731_0053`.
 
 ## Что уже работает
 
@@ -16,6 +16,10 @@ Alembic head: `20260724_0052`.
 - provider health, persisted reliability/latency, circuit breaker и явный failover;
 - intelligent routing по quality/cost/latency/reliability;
 - fail-closed Runtime Policy для каждого primary/failover route до adapter и secret injection;
+- Workspace-scoped Policy Approval Workflow с exact subject scope, TTL и одноразовым capability token;
+- approval-aware Gateway inference без failover bypass и с atomic consume перед provider call;
+- approval-bound runtime artifact export по ZIP SHA-256 и manifest fingerprint;
+- append-only decision evidence и отдельный React-раздел «Approvals»;
 - Workspace data classification и provider trust tiers с отдельным разделом «Политика»;
 - AI Council с режимами Solo / Council / Best-of-N / Review / Arbitration / Delegate;
 - Solo использует ровно одну модель; остальные коллективные режимы — 2–6 участников;
@@ -199,6 +203,7 @@ npm run build
 - [история и хранение Council](docs/P2_002_COUNCIL_HISTORY.md);
 - [Live Council](docs/P2_003_LIVE_COUNCIL.md);
 - [Code Sandbox & Verifiable Patches](docs/P2_007_CODE_SANDBOX.md);
+- [Policy Approval Workflow](docs/P2_012_POLICY_APPROVAL_WORKFLOW.md);
 - [безопасные миграции](docs/P1_013_ALEMBIC_DATABASE_MIGRATIONS.md);
 - [установка на Windows](docs/SETUP_WINDOWS.md).
 
@@ -227,3 +232,15 @@ POST /api/gateway/tes
 ## P2-010 Docker Isolated Runtime
 
 Недоверенные pytest/frontend build могут выполняться в disposable Docker runtime без сети, с read-only source mount и лимитами CPU/RAM/PID/time. Подготовка локальных runtime images выполняется явно через `prepare_p2_010_runtime.bat`.
+
+## P2-012 Policy Approval Workflow & Decision Evidence
+
+Sensitive Runtime Policy decisions can create a Workspace-scoped approval
+request bound to the exact operation subject and policy fingerprint. Approval
+tokens are returned once, stored only as domain-separated hashes and consumed
+atomically before the external inference or artifact byte release.
+
+The **Approvals** UI shows the pending queue, exact scope, reason codes, TTL,
+approve/deny/revoke actions and append-only evidence. Gateway approvals cannot
+authorize another provider/model route, and artifact approvals cannot authorize
+a changed ZIP, manifest, runtime run or Workspace.

@@ -7,13 +7,19 @@ import shutil
 import subprocess
 import tempfile
 from time import perf_counter
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 import uuid
 import zipfile
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.code_sandbox.artifact_approvals import (
+    RuntimeArtifactApprovalCoordinator,
+    RuntimeArtifactApprovalOutcome,
+    RuntimeArtifactDescriptor,
+    build_runtime_artifact_descriptor,
+)
 from backend.code_sandbox.models import CodeSandboxRuntimeRunModel, utc_now
 from backend.code_sandbox.runtime_policy import (
     IsolatedRuntimePolicy,
@@ -50,6 +56,68 @@ class IsolatedRuntimePolicyApprovalRequiredError(
     IsolatedRuntimeError
 ):
     pass
+
+
+class IsolatedRuntimeArtifactApprovalRequiredError(
+    IsolatedRuntimePolicyApprovalRequiredError
+):
+    def __init__(
+        self,
+        message: str,
+        *,
+        metadata: dict[str, Any],
+    ) -> None:
+        super().__init__(message)
+        self.code = "POLICY_APPROVAL_REQUIRED"
+        self.metadata = dict(metadata)
+
+
+class IsolatedRuntimeArtifactApprovalRejectedError(
+    IsolatedRuntimeError
+):
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.metadata = dict(metadata)
+        self.status_code = self._status_code(code)
+
+    @staticmethod
+    def _status_code(code: str) -> int:
+        if code == "POLICY_APPROVAL_CREDENTIALS_INCOMPLETE":
+            return 400
+        if code == "POLICY_APPROVAL_NOT_FOUND":
+            return 404
+        if code in {
+            "POLICY_APPROVAL_TOKEN_INVALID",
+            "POLICY_APPROVAL_SCOPE_MISMATCH",
+            "POLICY_APPROVAL_WORKSPACE_INVALID",
+        }:
+            return 403
+        if code in {
+            "POLICY_APPROVAL_EXPIRED",
+            "POLICY_APPROVAL_INVALID_STATE",
+            "RUNTIME_ARTIFACT_CHANGED",
+        }:
+            return 409
+        if code in {
+            "POLICY_APPROVAL_UNAVAILABLE",
+            "POLICY_APPROVAL_RESOLUTION_FAILED",
+            "POLICY_APPROVAL_CONSUME_FAILED",
+        }:
+            return 503
+        return 403
+
+
+@dataclass(frozen=True)
+class RuntimeArtifactExport:
+    content: bytes
+    metadata: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -102,6 +170,9 @@ class IsolatedRuntimeService:
         docker_executable: str | None = None,
         runner: Callable[..., subprocess.CompletedProcess] | None = None,
         runtime_policy: IsolatedRuntimePolicy | None = None,
+        artifact_approval_coordinator: (
+            RuntimeArtifactApprovalCoordinator | None
+        ) = None,
     ) -> None:
         self._session = session
         self._event_bus = event_bus
@@ -111,6 +182,9 @@ class IsolatedRuntimeService:
             or IsolatedRuntimePolicy(
                 event_bus=event_bus,
             )
+        )
+        self._artifact_approval_coordinator = (
+            artifact_approval_coordinator
         )
         self._docker = docker_executable or shutil.which("docker") or "docker"
         self._runner = runner or subprocess.run
@@ -236,29 +310,265 @@ class IsolatedRuntimeService:
         row = self._session.scalar(stmt)
         return self._to_schema(row) if row else None
 
-    async def artifact_zip_path(
+    async def artifact_zip_bytes(
         self,
         run_id: str,
         workspace_id: str | None,
-    ) -> Path:
-        policy_evaluation = (
+        *,
+        approval_id: str | None = None,
+        approval_token: str | None = None,
+        requested_by: str | None = None,
+    ) -> RuntimeArtifactExport:
+        row, path = self._artifact_row_and_path(
+            run_id,
+            workspace_id,
+        )
+        evaluation = (
             await self._runtime_policy.evaluate_artifact_export(
                 workspace_id=workspace_id,
             )
         )
-        self._require_policy_allowed(
-            policy_evaluation,
-            subject="runtime artifact export",
+
+        if evaluation.allowed:
+            return RuntimeArtifactExport(
+                content=self._read_artifact_bundle(path),
+                metadata={
+                    "runtime_run_id": row.id,
+                    "policy_action": evaluation.action.value,
+                },
+            )
+
+        if not evaluation.approval_required:
+            self._require_policy_allowed(
+                evaluation,
+                subject="runtime artifact export",
+            )
+
+        if not workspace_id:
+            raise IsolatedRuntimeArtifactApprovalRejectedError(
+                code="POLICY_APPROVAL_WORKSPACE_INVALID",
+                message=(
+                    "Runtime artifact approval requires "
+                    "a Workspace."
+                ),
+                metadata={
+                    "status": "workspace_invalid",
+                    "run_id": row.id,
+                },
+            )
+
+        coordinator = self._artifact_approval_coordinator
+        if coordinator is None:
+            raise IsolatedRuntimeArtifactApprovalRejectedError(
+                code="POLICY_APPROVAL_UNAVAILABLE",
+                message=(
+                    "The runtime artifact approval service "
+                    "is unavailable."
+                ),
+                metadata={
+                    "status": "unavailable",
+                    "run_id": row.id,
+                },
+            )
+
+        initial_content = self._read_artifact_bundle(path)
+        descriptor = self._artifact_descriptor(
+            row=row,
+            workspace_id=workspace_id,
+            content=initial_content,
         )
 
-        row = self._require_row(run_id, workspace_id)
-        path_text = (row.metadata_json or {}).get("artifact_zip_path")
-        if not path_text:
-            raise IsolatedRuntimeError("Для этого runtime run нет экспортированных артефактов.")
-        path = Path(str(path_text)).resolve()
-        if not path.is_file() or self._artifact_root.resolve() not in path.parents:
-            raise IsolatedRuntimeError("Artifact bundle отсутствует или недоступен.")
+        fresh_evaluation = (
+            await self._runtime_policy.evaluate_artifact_export(
+                workspace_id=workspace_id,
+            )
+        )
+        if fresh_evaluation.allowed:
+            return RuntimeArtifactExport(
+                content=initial_content,
+                metadata={
+                    "runtime_run_id": row.id,
+                    "policy_action": (
+                        fresh_evaluation.action.value
+                    ),
+                },
+            )
+        if not fresh_evaluation.approval_required:
+            self._require_policy_allowed(
+                fresh_evaluation,
+                subject="runtime artifact export",
+            )
+
+        has_id = bool(approval_id and approval_id.strip())
+        has_token = bool(approval_token)
+
+        if not has_id and not has_token:
+            outcome = await coordinator.request(
+                descriptor=descriptor,
+                evaluation=fresh_evaluation,
+                requested_by=(
+                    requested_by
+                    or "runtime-artifact-download"
+                ),
+            )
+            self._raise_artifact_approval_outcome(outcome)
+
+        outcome = await coordinator.consume(
+            descriptor=descriptor,
+            evaluation=fresh_evaluation,
+            approval_id=approval_id or "",
+            token=approval_token or "",
+        )
+        if not outcome.authorized:
+            self._raise_artifact_approval_outcome(outcome)
+
+        released_content = self._read_artifact_bundle(path)
+        released_descriptor = self._artifact_descriptor(
+            row=row,
+            workspace_id=workspace_id,
+            content=released_content,
+        )
+        if released_descriptor != descriptor:
+            raise IsolatedRuntimeArtifactApprovalRejectedError(
+                code="RUNTIME_ARTIFACT_CHANGED",
+                message=(
+                    "The runtime artifact bundle changed "
+                    "during approval consumption."
+                ),
+                metadata={
+                    "status": "artifact_changed",
+                    "run_id": row.id,
+                    "approval_id": (
+                        outcome.metadata.get("approval_id")
+                    ),
+                },
+            )
+
+        return RuntimeArtifactExport(
+            content=released_content,
+            metadata={
+                "runtime_run_id": row.id,
+                "policy_action": (
+                    fresh_evaluation.action.value
+                ),
+                "policy_approval": dict(outcome.metadata),
+                "bundle_sha256": descriptor.bundle_sha256,
+                "manifest_fingerprint": (
+                    descriptor.manifest_fingerprint
+                ),
+            },
+        )
+
+    async def artifact_zip_path(
+        self,
+        run_id: str,
+        workspace_id: str | None,
+        *,
+        approval_id: str | None = None,
+        approval_token: str | None = None,
+        requested_by: str | None = None,
+    ) -> Path:
+        await self.artifact_zip_bytes(
+            run_id,
+            workspace_id,
+            approval_id=approval_id,
+            approval_token=approval_token,
+            requested_by=requested_by,
+        )
+        _, path = self._artifact_row_and_path(
+            run_id,
+            workspace_id,
+        )
         return path
+
+    def _artifact_row_and_path(
+        self,
+        run_id: str,
+        workspace_id: str | None,
+    ) -> tuple[CodeSandboxRuntimeRunModel, Path]:
+        row = self._require_row(run_id, workspace_id)
+        path_text = (row.metadata_json or {}).get(
+            "artifact_zip_path"
+        )
+        if not path_text:
+            raise IsolatedRuntimeError(
+                "Для этого runtime run нет "
+                "экспортированных артефактов."
+            )
+        path = Path(str(path_text)).resolve()
+        if (
+            not path.is_file()
+            or self._artifact_root.resolve()
+            not in path.parents
+        ):
+            raise IsolatedRuntimeError(
+                "Artifact bundle отсутствует или недоступен."
+            )
+        return row, path
+
+    def _read_artifact_bundle(self, path: Path) -> bytes:
+        with path.open("rb") as handle:
+            content = handle.read(
+                self.ARTIFACT_MAX_BYTES + 1
+            )
+        if len(content) > self.ARTIFACT_MAX_BYTES:
+            raise IsolatedRuntimeError(
+                "Runtime artifact ZIP exceeds "
+                "the safe byte limit."
+            )
+        if not content:
+            raise IsolatedRuntimeError(
+                "Runtime artifact ZIP is empty."
+            )
+        return content
+
+    @staticmethod
+    def _artifact_descriptor(
+        *,
+        row: CodeSandboxRuntimeRunModel,
+        workspace_id: str,
+        content: bytes,
+    ) -> RuntimeArtifactDescriptor:
+        return build_runtime_artifact_descriptor(
+            workspace_id=workspace_id,
+            run_id=row.id,
+            session_id=row.session_id,
+            profile=row.profile,
+            bundle=content,
+            artifact_paths=(
+                row.artifact_paths_json or []
+            ),
+        )
+
+    @staticmethod
+    def _raise_artifact_approval_outcome(
+        outcome: RuntimeArtifactApprovalOutcome,
+    ) -> None:
+        if outcome.error_code == "POLICY_APPROVAL_REQUIRED":
+            raise (
+                IsolatedRuntimeArtifactApprovalRequiredError(
+                    outcome.message
+                    or (
+                        "Runtime artifact export requires "
+                        "human approval."
+                    ),
+                    metadata=outcome.metadata,
+                )
+            )
+        raise IsolatedRuntimeArtifactApprovalRejectedError(
+            code=(
+                outcome.error_code
+                or "POLICY_APPROVAL_CONSUME_FAILED"
+            ),
+            message=(
+                outcome.message
+                or (
+                    "Runtime artifact approval "
+                    "failed closed."
+                )
+            ),
+            metadata=outcome.metadata,
+        )
 
     async def _run_profile(
         self,
