@@ -145,7 +145,15 @@
 
 ## Phase 3 — Additional Workspaces
 
-- Documents: PDF, DOCX, OCR, summaries;
+### P3-001 — Documents Workspace
+
+Статус: **разработка начата**.
+
+- P3-001.1: safe intake core для PDF, DOCX, XLSX и TXT;
+- далее: registry/storage, extraction, OCR, summaries и Documents UI.
+
+Остальные направления:
+
 - Research: sources, citations, reports;
 - Browser: controlled sessions and evidence;
 - Code: repository-aware assistance;
