@@ -218,3 +218,17 @@ Denied policy decisions, incomplete credentials, invalid or reused tokens,
 expired approvals, scope changes and cross-Workspace attempts never return
 artifact content. Pending and rejected responses contain only sanitized
 approval metadata.
+
+## P2-012.5a — Approval Center UI
+
+The React workspace now includes a dedicated Approval Center for the
+Workspace-scoped policy approval queue. Operators can filter by status and
+operation, inspect exact subject payloads and fingerprints, reconcile expired
+records, approve or deny pending requests, revoke approved capabilities and
+review the append-only evidence sequence.
+
+The approve response displays the one-time capability token only in volatile
+component state. It is not written to localStorage, query parameters, URLs or
+approval evidence. Changing the selected approval clears the displayed token.
+The UI also preserves authenticated actor binding: an explicit operator id is
+sent only when entered for an unauthenticated local workflow.

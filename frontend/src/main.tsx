@@ -5,10 +5,11 @@ import React, {
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
+import PolicyApprovalCenter from "./PolicyApprovalCenter";
 import WorkspacePolicyPanel from "./WorkspacePolicyPanel";
 import "./styles.css";
 
-type View = "chat" | "council" | "gateway" | "sandbox" | "settings";
+type View = "chat" | "council" | "gateway" | "sandbox" | "approvals" | "settings";
 type Mode = "universal" | "crypto" | "code" | "documents";
 type CouncilExecutionMode =
   | "solo"
@@ -2185,10 +2186,17 @@ function App() {
             Документы
           </button>
           <button
+            className={view === "approvals" ? "active" : ""}
+            onClick={() => setView("approvals")}
+          >
+            <span>07</span>
+            Approvals
+          </button>
+          <button
             className={view === "settings" ? "active" : ""}
             onClick={() => setView("settings")}
           >
-            <span>07</span>
+            <span>08</span>
             Политика
           </button>
         </nav>
@@ -3285,6 +3293,8 @@ function App() {
               councilResult?.run_id ?? historyDetail?.run_id ?? ""
             }
           />
+        ) : view === "approvals" ? (
+          <PolicyApprovalCenter />
         ) : (
           <WorkspacePolicyPanel />
         )}
