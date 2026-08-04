@@ -184,3 +184,19 @@ evidence chain.
 End-to-end tests exercise API request, operator approval, atomic token
 consumption, provider invocation, evidence persistence, token reuse,
 scope mismatch, partial credentials and cross-Workspace isolation.
+
+## P2-012.4b — Runtime Artifact Approval Coordinator
+
+The runtime artifact approval coordinator binds one approval to an immutable
+artifact descriptor containing the Workspace, runtime run, sandbox session,
+profile, ZIP SHA-256, manifest fingerprint, bundle size and artifact count.
+The raw ZIP bytes and artifact contents are never persisted in the approval
+record, metadata or evidence.
+
+Repeated requests for the same active scope reuse the pending approval.
+Consumption is one-time and fail-closed. A changed ZIP, manifest, Workspace,
+policy fingerprint or runtime run produces a different scope and cannot reuse
+the original capability token.
+
+The next subphase wires this coordinator into runtime artifact download with a
+fresh policy evaluation immediately before token consumption and byte release.
