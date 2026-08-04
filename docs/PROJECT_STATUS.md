@@ -1,8 +1,8 @@
 # AI Studio Enterprise — Project Status
 
-Текущий этап: **P2-011 — Runtime Policy, Trust and Data Classification**, реализован.
-Версия: **0.15.0 / P2-011**.
-Alembic head: **`20260724_0052`**.
+Текущий этап: **P2-012 — Policy Approval Workflow & Decision Evidence**, реализован.
+Версия: **0.16.0 / P2-012**.
+Alembic head: **`20260731_0053`**.
 
 ## Завершённый фундамент P1
 
@@ -29,6 +29,32 @@ Alembic приводила к пропуску семи core-таблиц. Те�
 - частичная схема отклоняется без изменения revision;
 - полный round trip миграций проверяется тестом;
 - актуальная metadata содержит 152 таблицы.
+
+## P2-012 — Policy Approval Workflow & Decision Evidence
+
+- независимый approval domain связывает решение с Workspace, operation,
+  policy version/fingerprint и точным subject scope;
+- состояния `pending`, `approved`, `denied`, `expired`, `revoked` и `consumed`
+  работают fail-closed с ограниченным TTL;
+- raw token возвращается только один раз при approve, а в БД хранится только
+  domain-separated SHA-256 hash;
+- миграция `20260731_0053` добавляет Workspace-isolated approvals и глобальную
+  append-only SHA-256 evidence chain;
+- REST API использует Human Control permissions, authenticated actor и
+  Workspace binding;
+- AI Gateway создаёт exact route approval и atomically consumes token перед
+  non-streaming или streaming provider call;
+- каждый failover candidate оценивается отдельно и не может использовать
+  approval другого provider/model route;
+- runtime artifact approval связан с runtime run, sandbox session, ZIP SHA-256
+  и manifest fingerprint;
+- ZIP выдаётся только после fresh policy evaluation, atomic consume и
+  повторной проверки descriptor;
+- React Approval Center поддерживает очередь, фильтры, exact scope preview,
+  reason codes, TTL, approve/deny/revoke и evidence;
+- frontend production build: **PASSED**;
+- backend regression: **454 passed, 1 skipped, 2 warnings**;
+- Alembic `heads` и `current`: **`20260731_0053 (head)`**.
 
 ## P2-011 — Runtime Policy, Trust and Data Classification
 
@@ -157,7 +183,9 @@ Alembic приводила к пропуску семи core-таблиц. Те�
 - P2-006 targeted tests: Solo, Best-of-N, Review, Arbitration, bounded Delegate, independence validation и advanced cost ledger;
 - P2-007 targeted tests: реальные Git worktrees, fingerprint/TOCTOU, protected/blocked paths, approvals, safe apply, allowed roots, Git execution guards и Alembic CLI DB override;
 - P2-008 targeted tests: exact writable allowlist, Council handoff, malformed agent output, blocked secret paths, `.gitattributes` guard, exact-once replace, protected-file approval flow, запрет auto host-test/build, no-auto-apply и concurrent-edit TOCTOU;
-- TypeScript `--noEmit` проверен в текущей среде; production Vite build требует Linux native dependencies, отсутствующие в Windows `node_modules` из архива.
+- P2-012 targeted regression: domain, persistence, REST API, Gateway coordinator/enforcement/API, runtime artifact coordinator/enforcement;
+- frontend production build и TypeScript compilation: **PASSED** в текущей Windows-среде;
+- полный backend regression: **454 passed, 1 skipped, 2 warnings**.
 
 ## P2-004 — Council Presets & Cost Control
 
@@ -207,4 +235,5 @@ Alembic приводила к пропуску семи core-таблиц. Те�
 
 ## Следующий этап
 
-**P2-009 — Multi-Provider Model Gateway & Provider Failover**.
+**Phase 3 — Additional Workspaces**. Конкретный первый модуль выбирается
+отдельным архитектурным решением после выпуска P2-012.

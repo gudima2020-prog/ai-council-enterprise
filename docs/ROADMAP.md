@@ -1,7 +1,7 @@
 # AI Studio Enterprise — Roadmap
 
-Версия плана: **0.15.0**
-Дата обновления: **2026-07-30**
+Версия плана: **0.16.0**
+Дата обновления: **2026-08-04**
 
 ## Phase 1 — Enterprise Core
 
@@ -12,7 +12,7 @@
 - Autonomous Missions;
 - Human Control Center;
 - Secret Management и внешние Secret Providers;
-- Alembic head `20260724_0052`.
+- Alembic head `20260731_0053`.
 
 ## Phase 2 — Product Modules
 
@@ -128,6 +128,20 @@
 - host metadata validation и обязательный isolated runtime для кода;
 - artifact export controls и runtime policy audit snapshots;
 - Workspace Policy UI и release verification.
+
+
+### P2-012 — Policy Approval Workflow & Decision Evidence
+
+Статус: **реализован в v0.16.0**.
+
+- Workspace-scoped approval domain с exact subject и policy fingerprints;
+- pending/approved/denied/expired/revoked/consumed state machine;
+- one-time domain-hashed capability tokens и atomic database consume;
+- append-only SHA-256 decision evidence;
+- Human Control-bound REST API и Approval Center UI;
+- AI Gateway enforcement без failover bypass;
+- runtime artifact enforcement по ZIP SHA-256 и manifest fingerprint;
+- release verification: 454 backend tests passed, frontend build passed.
 
 ## Phase 3 — Additional Workspaces
 

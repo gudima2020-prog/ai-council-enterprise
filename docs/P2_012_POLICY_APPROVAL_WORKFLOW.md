@@ -2,9 +2,11 @@
 
 ## Статус
 
-P2-012 начат. Подэтап **P2-012.1 Approval Domain Core** реализует
-независимую от БД state machine для одноразовых approvals, связанных с точным
-Runtime Policy decision и точным operation subject.
+**P2-012 реализован и проверен в AI Studio Enterprise v0.16.0.**
+
+Релиз включает независимый approval domain, persistence и append-only
+decision evidence, Workspace REST API, AI Gateway enforcement, runtime
+artifact enforcement и React Approval Center.
 
 ## Почему нужен отдельный policy approval domain
 
@@ -61,7 +63,7 @@ P2-012 не заменяет эти механизмы автоматическ�
 - artifact manifest fingerprint;
 - policy decision fingerprint.
 
-## Следующие подэтапы
+## Реализованные подэтапы
 
 ### P2-012.2 — Persistence and API
 
@@ -106,7 +108,7 @@ P2-012 не заменяет эти механизмы автоматическ�
 - evidence отклоняет ключи, похожие на token, secret, prompt, response или raw content;
 - события содержат только безопасный approval summary.
 
-API routes будут подключены в P2-012.2b.
+API routes подключены в P2-012.2b.
 
 ## P2-012.2b — Policy Approval REST API
 
@@ -149,8 +151,8 @@ bound to the expected token hash, policy fingerprint and scope fingerprint.
 A stale concurrent session receives a fail-closed state error and cannot
 authorize a second external inference.
 
-P2-012.3b will connect the coordinator to both normal and streaming AI Gateway
-execution before secret resolution and provider adapter construction.
+P2-012.3b connected the coordinator to normal and streaming AI Gateway
+execution before provider invocation, with fail-closed route isolation.
 
 
 ## P2-012.3b — AI Gateway Enforcement
@@ -198,8 +200,8 @@ Consumption is one-time and fail-closed. A changed ZIP, manifest, Workspace,
 policy fingerprint or runtime run produces a different scope and cannot reuse
 the original capability token.
 
-The next subphase wires this coordinator into runtime artifact download with a
-fresh policy evaluation immediately before token consumption and byte release.
+P2-012.4c wires this coordinator into runtime artifact download with a fresh
+policy evaluation immediately before token consumption and byte release.
 
 ## P2-012.4c — Runtime Artifact Download Enforcement
 
@@ -232,3 +234,19 @@ component state. It is not written to localStorage, query parameters, URLs or
 approval evidence. Changing the selected approval clears the displayed token.
 The UI also preserves authenticated actor binding: an explicit operator id is
 sent only when entered for an unauthenticated local workflow.
+
+## P2-012.5b — Release Verification
+
+Release target: **AI Studio Enterprise v0.16.0 / P2-012**.
+
+Verified on Windows on 2026-08-04:
+
+- Alembic heads/current: `20260731_0053 (head)`;
+- frontend TypeScript/Vite production build: PASSED;
+- targeted approval workflow regression: PASSED;
+- full backend regression: 454 passed, 1 skipped, 2 warnings;
+- branch synchronization before release closure: PASSED.
+
+`verify_p2_012.bat` reproduces migration, domain contract, targeted regression,
+full backend regression and frontend build checks. The final annotated release
+tag is `v0.16.0-p2-012`.

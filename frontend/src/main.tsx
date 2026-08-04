@@ -590,7 +590,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "system",
-      text: "AI Studio Enterprise v0.15.0: fail-closed Runtime Policy для провайдеров, кода и артефактов.",
+      text: "AI Studio Enterprise v0.16.0: fail-closed Runtime Policy, one-time approvals и decision evidence.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -2145,7 +2145,7 @@ function App() {
         <div className="brand-mark">C</div>
         <div>
           <div className="logo">AI Studio</div>
-          <div className="version">Enterprise v0.15.0</div>
+          <div className="version">Enterprise v0.16.0</div>
         </div>
 
         <nav className="nav" aria-label="Разделы">
