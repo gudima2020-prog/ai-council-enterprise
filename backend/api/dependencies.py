@@ -5,18 +5,16 @@ from collections.abc import Generator
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
-from backend.core.container import AppContainer
+from backend.code_sandbox.agent import CodeAgentService
 from backend.code_sandbox.artifact_approvals import (
     RuntimeArtifactApprovalCoordinator,
 )
-from backend.code_sandbox.service import CodeSandboxService
-from backend.code_sandbox.agent import CodeAgentService
 from backend.code_sandbox.runtime import IsolatedRuntimeService
 from backend.code_sandbox.runtime_policy import (
     IsolatedRuntimePolicy,
 )
-from backend.gateway.factory import build_ai_gateway
-from backend.gateway.service import AIGateway
+from backend.code_sandbox.service import CodeSandboxService
+from backend.core.container import AppContainer
 from backend.council.control import CouncilControlService
 from backend.council.history import CouncilHistoryService
 from backend.council.live import CouncilLiveManager
@@ -25,7 +23,10 @@ from backend.database.session import session_scope
 from backend.documents.extraction_service import (
     DocumentExtractionService,
 )
+from backend.documents.ocr_service import DocumentOCRService
 from backend.documents.service import DocumentRegistryService
+from backend.gateway.factory import build_ai_gateway
+from backend.gateway.service import AIGateway
 from backend.policy_approvals.service import PolicyApprovalService
 from backend.repositories.settings import SettingsRepository
 from backend.runtime_policy import DataClassification
@@ -73,6 +74,16 @@ def get_document_extraction_service(
     container: AppContainer = Depends(get_container),
 ) -> DocumentExtractionService:
     return DocumentExtractionService(
+        session=session,
+        event_bus=container.event_bus,
+    )
+
+
+def get_document_ocr_service(
+    session: Session = Depends(get_db_session),
+    container: AppContainer = Depends(get_container),
+) -> DocumentOCRService:
+    return DocumentOCRService(
         session=session,
         event_bus=container.event_bus,
     )

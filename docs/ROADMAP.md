@@ -155,7 +155,8 @@
 - P3-001.3a: deterministic PDF/DOCX/XLSX/TXT extraction core;
 - P3-001.3b: persisted extraction runs, units, chunks and Workspace API;
 - P3-001.4a: isolated PDF OCR core with trusted Docker runtime;
-- далее: OCR persistence/retention/API, summaries, citations и Documents UI.
+- P3-001.4b: Workspace OCR persistence, retention, retry and bounded API;
+- далее: summaries, questions, citations и Documents UI.
 
 Остальные направления:
 

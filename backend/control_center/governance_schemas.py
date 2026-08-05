@@ -47,6 +47,7 @@ class HumanControlPermission(StrEnum):
     DOCUMENT_VIEW = "document.view"
     DOCUMENT_UPLOAD = "document.upload"
     DOCUMENT_EXTRACT = "document.extract"
+    DOCUMENT_OCR = "document.ocr"
     DOCUMENT_DELETE = "document.delete"
     DOCUMENT_AUDIT = "document.audit"
     SECRET_VIEW = "secret.view"

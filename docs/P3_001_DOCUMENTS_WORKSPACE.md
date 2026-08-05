@@ -2,8 +2,8 @@
 
 ## Статус
 
-P3-001 находится в активной разработке. Текущий рабочий подэтап —
-**P3-001.4a Isolated PDF OCR Core**. Стабильной контрольной точкой проекта
+P3-001 находится в активной разработке. Текущий завершённый подэтап —
+**P3-001.4b OCR Persistence, Retention and API**. Стабильной контрольной точкой проекта
 остаётся `0.16.0 / P2-012` до завершения всего Documents Workspace release.
 
 Documents Workspace должен поддерживать PDF, DOCX, XLSX и TXT, извлечение
@@ -187,13 +187,51 @@ OCR persistence, API routes и retention records на этом подэтапе 
 
 ### P3-001.4b — OCR Persistence, Retention and API
 
-- Workspace-scoped OCR runs/pages;
-- pending/running/completed/failed status и safe retry;
-- explicit page selection и blank-page recommendation;
-- sensitive derived-content classification и retention policy;
-- bounded OCR page/result API;
-- deletion of OCR text together with the source document;
-- metadata-only audit/Event Bus evidence.
+Реализованы:
+
+- Alembic revision `20260805_0056` и отдельные таблицы
+  `document_ocr_runs` / `document_ocr_pages`;
+- Workspace-scoped OCR runs/pages со статусами `pending`, `running`,
+  `completed`, `failed`;
+- deterministic request fingerprint по OCR policy, page selection и retention;
+- idempotent reuse completed run, конфликт для running и безопасный retry
+  failed/purged run в той же записи с увеличением `attempt_count`;
+- explicit 1-based page selection с сортировкой/дедупликацией и режимом `all`;
+- persisted page text, text/PNG SHA-256, размеры, warnings и runtime provenance
+  без сохранения page images;
+- blank-page numbers и machine-readable рекомендация
+  `review_or_retry_blank_pages`;
+- наследование source classification каждым run/page;
+- classification-aware policy `classification-retention-v1`: public 365,
+  internal 180, confidential 90, restricted 30 дней; API может только сократить,
+  но не продлить соответствующий предел;
+- retention expiry, `active` / `purged` text state и metadata-preserving purge;
+- отдельный permission `document.ocr` для запуска и
+  `human_control.retention.manage` для принудительного purge expired text;
+- bounded Workspace API:
+  `POST/GET /api/workspaces/{workspace_id}/documents/{document_id}/ocr-runs`,
+  `GET .../ocr-runs/{run_id}`, `GET .../ocr-runs/{run_id}/pages` и
+  `POST .../ocr-retention/purge`;
+- OCR page text возвращается только при явном `include_text=true`;
+- безопасное HTTP error mapping и persisted error evidence без PDF/OCR text;
+- metadata-only Event Bus события `document.ocr.completed`,
+  `document.ocr.failed` и `document.ocr.retention_purged`;
+- удаление OCR pages/runs вместе с extraction artifacts до tombstone deletion
+  исходного документа;
+- migration, persistence, isolation, permission, retry, retention, cleanup,
+  OpenAPI и regression tests;
+- Windows verification script `verify_p3_001_4b.bat`.
+
+OCR runtime остаётся изолированным boundary подэтапа P3-001.4a. P3-001.4b
+не передаёт OCR text в AI Gateway и не создаёт embeddings.
+
+Проверка P3-001.4b от 2026-08-05:
+
+- OCR persistence/API tests: **19 passed**;
+- Documents Workspace targeted suite: **118 passed**;
+- migration manager: **9 passed**;
+- full backend regression: **572 passed, 2 known warnings**;
+- frontend TypeScript/Vite production build: **PASSED**.
 
 ### P3-001.5 — Summaries, Questions and Citations
 

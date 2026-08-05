@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.core.events import Event, EventBus
 from backend.database.models import WorkspaceModel
+from backend.documents.extraction_repository import DocumentExtractionRepository
 from backend.documents.intake import (
     DocumentIntakeDescriptor,
     DocumentIntakeRequest,
@@ -18,13 +19,12 @@ from backend.documents.models import (
     DocumentEventModel,
     DocumentModel,
 )
-from backend.documents.extraction_repository import DocumentExtractionRepository
+from backend.documents.ocr_repository import DocumentOCRRepository
 from backend.documents.repository import DocumentRepository
 from backend.documents.storage import (
     DocumentStorageError,
     ManagedDocumentStorage,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _BLOCKED_METADATA_KEYS = {
@@ -398,6 +398,14 @@ class DocumentRegistryService:
                 workspace_id=row.workspace_id,
             )
         )
+        ocr_deleted = DocumentOCRRepository(
+            self._session
+        ).delete_derived(
+            document_id=row.id,
+            workspace_id=row.workspace_id,
+        )
+        if any(ocr_deleted.values()):
+            derived_deleted.update(ocr_deleted)
         active_references = (
             self._repository.active_storage_references(
                 storage_key=row.storage_key,

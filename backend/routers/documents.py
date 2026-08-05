@@ -14,9 +14,11 @@ from fastapi import (
     UploadFile,
     status,
 )
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from backend.api.dependencies import (
     get_document_extraction_service,
+    get_document_ocr_service,
     get_document_registry_service,
     get_workspace_policy_service,
 )
@@ -41,6 +43,12 @@ from backend.documents.intake import (
     DocumentIntakePolicy,
     DocumentIntakeRequest,
 )
+from backend.documents.ocr_service import (
+    DocumentOCRConflictError,
+    DocumentOCRNotFoundError,
+    DocumentOCRService,
+    DocumentOCRServiceError,
+)
 from backend.documents.service import (
     DocumentNotFoundError,
     DocumentRegistryError,
@@ -50,7 +58,6 @@ from backend.documents.service import (
 from backend.documents.storage import DocumentStorageError
 from backend.services.workspace_policy import WorkspacePolicyService
 
-
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/documents",
     tags=["documents"],
@@ -59,6 +66,20 @@ router = APIRouter(
 _UPLOAD_READ_CHUNK_BYTES = 64 * 1024
 _MAX_UPLOAD_BYTES = DocumentIntakePolicy().max_file_bytes
 _MAX_METADATA_JSON_CHARS = 32_768
+
+
+class DocumentOCRRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_numbers: list[StrictInt] | None = Field(
+        default=None,
+        max_length=100,
+    )
+    retention_days: StrictInt | None = Field(
+        default=None,
+        ge=1,
+        le=3650,
+    )
 
 
 def _translate_error(exc: Exception) -> HTTPException:
@@ -106,6 +127,26 @@ def _translate_error(exc: Exception) -> HTTPException:
     ):
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+    if isinstance(exc, DocumentOCRNotFoundError):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+    if isinstance(exc, DocumentOCRConflictError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+
+    if isinstance(exc, DocumentOCRServiceError):
+        return HTTPException(
+            status_code=(
+                status.HTTP_422_UNPROCESSABLE_CONTENT
+            ),
             detail=str(exc),
         )
 
@@ -561,6 +602,223 @@ def list_document_extraction_chunks(
         "limit": limit,
         "offset": offset,
     }
+
+
+@router.post("/{document_id}/ocr-runs")
+async def run_document_ocr(
+    workspace_id: str,
+    document_id: str,
+    request: DocumentOCRRunRequest,
+    response: Response,
+    service: DocumentOCRService = Depends(
+        get_document_ocr_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.DOCUMENT_OCR.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    actor_id = _bound_actor(principal)
+    try:
+        result = await service.recognize(
+            document_id=document_id,
+            workspace_id=workspace_id,
+            page_numbers=request.page_numbers,
+            retention_days=request.retention_days,
+            actor_id=actor_id,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+
+    if result.record.status == "failed":
+        error_code = result.record.error_code or ""
+        if error_code in {
+            "DOCUMENT_STORAGE_MISSING",
+            "DOCUMENT_STORAGE_SIZE_MISMATCH",
+            "DOCUMENT_STORAGE_HASH_MISMATCH",
+        }:
+            response.status_code = status.HTTP_409_CONFLICT
+        elif error_code in {
+            "DOCUMENT_OCR_RUNTIME_IMAGE_MISSING",
+            "DOCUMENT_OCR_RUNTIME_UNAVAILABLE",
+            "DOCUMENT_OCR_RUNTIME_UNTRUSTED",
+        }:
+            response.status_code = (
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        elif error_code == "DOCUMENT_OCR_INTERNAL_ERROR":
+            response.status_code = (
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        elif error_code in {
+            "DOCUMENT_OCR_ENGINE_FAILED",
+            "DOCUMENT_OCR_PAGE_TIMEOUT",
+            "DOCUMENT_OCR_RUNTIME_FAILED",
+            "DOCUMENT_OCR_RUNTIME_INTERNAL_ERROR",
+            "DOCUMENT_OCR_RUNTIME_TIMEOUT",
+        }:
+            response.status_code = status.HTTP_502_BAD_GATEWAY
+        else:
+            response.status_code = (
+                status.HTTP_422_UNPROCESSABLE_CONTENT
+            )
+    else:
+        response.status_code = (
+            status.HTTP_201_CREATED
+            if result.created
+            else status.HTTP_200_OK
+        )
+
+    return {
+        "created": result.created,
+        "reused": result.reused,
+        "ocr_run": result.record.to_public_dict(),
+    }
+
+
+@router.get("/{document_id}/ocr-runs")
+def list_document_ocr_runs(
+    workspace_id: str,
+    document_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: DocumentOCRService = Depends(
+        get_document_ocr_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.DOCUMENT_VIEW.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    try:
+        items = service.list_runs(
+            document_id=document_id,
+            workspace_id=workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+    return {
+        "workspace_id": workspace_id,
+        "document_id": document_id,
+        "items": [item.to_public_dict() for item in items],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/{document_id}/ocr-runs/{run_id}")
+def get_document_ocr_run(
+    workspace_id: str,
+    document_id: str,
+    run_id: str,
+    service: DocumentOCRService = Depends(
+        get_document_ocr_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.DOCUMENT_VIEW.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    try:
+        record = service.get(
+            run_id=run_id,
+            document_id=document_id,
+            workspace_id=workspace_id,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+    return record.to_public_dict()
+
+
+@router.get("/{document_id}/ocr-runs/{run_id}/pages")
+def list_document_ocr_pages(
+    workspace_id: str,
+    document_id: str,
+    run_id: str,
+    include_text: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: DocumentOCRService = Depends(
+        get_document_ocr_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.DOCUMENT_VIEW.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    try:
+        items = service.list_pages(
+            run_id=run_id,
+            document_id=document_id,
+            workspace_id=workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+    return {
+        "workspace_id": workspace_id,
+        "document_id": document_id,
+        "run_id": run_id,
+        "include_text": include_text,
+        "items": [
+            item.to_public_dict(include_text=include_text)
+            for item in items
+        ],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.post("/{document_id}/ocr-retention/purge")
+async def purge_document_ocr_retention(
+    workspace_id: str,
+    document_id: str,
+    service: DocumentOCRService = Depends(
+        get_document_ocr_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.RETENTION_MANAGE.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    actor_id = _bound_actor(principal)
+    try:
+        result = await service.purge_expired(
+            document_id=document_id,
+            workspace_id=workspace_id,
+            actor_id=actor_id,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+    return result.to_public_dict()
 
 
 @router.get("/{document_id}/events")

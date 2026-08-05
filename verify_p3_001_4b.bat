@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ============================================================
-echo AI Studio Enterprise - P3-001.4a OCR core verification
+echo AI Studio Enterprise - P3-001.4b OCR persistence verification
 echo ============================================================
 
 if not exist ".venv\Scripts\python.exe" (
@@ -39,38 +39,36 @@ echo.
 echo Working tree whitespace check:
 git diff --check
 if errorlevel 1 exit /b 1
+git diff --cached --check
+if errorlevel 1 exit /b 1
 
 echo.
 echo Python compile check:
-python -m py_compile backend\documents\ocr.py docker\ocr\runner.py
+python -m py_compile ^
+  backend\documents\models.py ^
+  backend\documents\ocr.py ^
+  backend\documents\ocr_repository.py ^
+  backend\documents\ocr_service.py ^
+  backend\routers\documents.py ^
+  alembic\versions\20260805_0056_document_ocr_persistence.py
 if errorlevel 1 exit /b 1
 
 echo.
-echo Database migration compatibility check:
-python -m alembic history | findstr /C:"20260805_0055"
+echo Database migration head check:
+python -m alembic heads | findstr /C:"20260805_0056"
 if errorlevel 1 (
-  echo ERROR: expected Alembic revision 20260805_0055.
+  echo ERROR: expected Alembic head 20260805_0056.
   exit /b 1
 )
 
 echo.
-echo OCR contract check:
-python -c "from backend.documents import DockerTesseractOCRRuntime, IsolatedPDFOCR; assert IsolatedPDFOCR.OCR_VERSION == 'p3-001.4a-v1'; assert DockerTesseractOCRRuntime.EXPECTED_RUNTIME_VERSION == '5-v1'"
+echo OCR persistence contract check:
+python -c "from backend.control_center.governance_schemas import HumanControlPermission; from backend.documents import DocumentOCRRetentionPolicy, DocumentOCRService; assert HumanControlPermission.DOCUMENT_OCR.value == 'document.ocr'; assert DocumentOCRRetentionPolicy().confidential_days == 90; assert DocumentOCRService"
 if errorlevel 1 exit /b 1
 
-if not exist "docker\ocr\Dockerfile" (
-  echo ERROR: OCR Dockerfile is missing.
-  exit /b 1
-)
-
-if not exist "prepare_p3_001_4a_ocr_runtime.bat" (
-  echo ERROR: OCR runtime preparation script is missing.
-  exit /b 1
-)
-
-findstr /C:"P3-001.4a" "docs\P3_001_DOCUMENTS_WORKSPACE.md" >nul
+findstr /C:"P3-001.4b" "docs\P3_001_DOCUMENTS_WORKSPACE.md" >nul
 if errorlevel 1 (
-  echo ERROR: P3-001.4a documentation marker is missing.
+  echo ERROR: P3-001.4b documentation marker is missing.
   exit /b 1
 )
 
@@ -84,6 +82,9 @@ python -m pytest -q ^
   tests\test_document_extraction_persistence.py ^
   tests\test_document_extraction_api.py ^
   tests\test_document_ocr_core.py ^
+  tests\test_document_ocr_persistence.py ^
+  tests\test_document_ocr_api.py ^
+  tests\test_migration_manager.py ^
   tests\test_openapi_schema.py
 if errorlevel 1 exit /b 1
 
@@ -104,7 +105,7 @@ echo.
 echo OCR Docker runtime preflight:
 where docker >nul 2>nul
 if errorlevel 1 (
-  echo INFO: Docker CLI is not installed. Run the preparation script on the target host.
+  echo INFO: Docker CLI is not installed. Run the 4a preparation script on the target host.
 ) else (
   docker version >nul 2>nul
   if errorlevel 1 (
@@ -122,5 +123,5 @@ if errorlevel 1 (
 )
 
 echo.
-echo P3-001.4a verification PASSED.
+echo P3-001.4b verification PASSED.
 exit /b 0
