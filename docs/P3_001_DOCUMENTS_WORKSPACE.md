@@ -84,11 +84,22 @@ core и сохраняет независимость storage boundary от Fast
 
 ## P3-001.2b — Document Registry REST API
 
-- Workspace-scoped multipart upload;
-- Human Control permissions и authenticated actor binding;
+Реализованы:
+
+- Workspace-scoped multipart upload для PDF, DOCX, XLSX и TXT;
+- серверное назначение classification из effective Workspace Policy;
+- authenticated Human Control actor binding без клиентского `actor_id`;
+- отдельные permissions `document.view`, `document.upload`,
+  `document.delete` и `document.audit`;
+- bounded multipart read до передачи bytes в intake/storage core;
+- JSON-object metadata form с запретом raw content/secret fields;
 - list/get/delete/events routes;
-- safe error mapping и bounded request handling;
-- OpenAPI and end-to-end tests.
+- idempotent upload и delete semantics;
+- безопасное HTTP error mapping без раскрытия storage paths;
+- OpenAPI и end-to-end API tests.
+
+Публичный API не возвращает `storage_key`, raw bytes или извлечённый текст.
+Deleted tombstones и event evidence остаются внутри registry/audit boundary.
 
 ### P3-001.3 — Deterministic Text Extraction
 

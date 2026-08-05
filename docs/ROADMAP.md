@@ -151,7 +151,8 @@
 
 - P3-001.1: safe intake core для PDF, DOCX, XLSX и TXT;
 - P3-001.2a: Workspace registry и content-addressed managed storage;
-- далее: REST API, extraction, OCR, summaries и Documents UI.
+- P3-001.2b: Human Control-bound multipart REST API;
+- далее: extraction, OCR, summaries и Documents UI.
 
 Остальные направления:
 

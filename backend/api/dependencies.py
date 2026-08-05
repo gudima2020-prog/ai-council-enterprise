@@ -22,6 +22,7 @@ from backend.council.history import CouncilHistoryService
 from backend.council.live import CouncilLiveManager
 from backend.council.repository import CouncilRunRepository
 from backend.database.session import session_scope
+from backend.documents.service import DocumentRegistryService
 from backend.policy_approvals.service import PolicyApprovalService
 from backend.repositories.settings import SettingsRepository
 from backend.runtime_policy import DataClassification
@@ -49,6 +50,16 @@ def get_policy_approval_service(
     container: AppContainer = Depends(get_container),
 ) -> PolicyApprovalService:
     return PolicyApprovalService(
+        session=session,
+        event_bus=container.event_bus,
+    )
+
+
+def get_document_registry_service(
+    session: Session = Depends(get_db_session),
+    container: AppContainer = Depends(get_container),
+) -> DocumentRegistryService:
+    return DocumentRegistryService(
         session=session,
         event_bus=container.event_bus,
     )
