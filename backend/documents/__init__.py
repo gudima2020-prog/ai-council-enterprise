@@ -1,3 +1,11 @@
+from backend.documents.extraction import (
+    DeterministicDocumentExtractor,
+    DocumentExtractionError,
+    DocumentExtractionPolicy,
+    DocumentExtractionResult,
+    ExtractedTextUnit,
+    ExtractionUnitKind,
+)
 from backend.documents.intake import (
     DocumentFormat,
     DocumentIntakeDescriptor,
@@ -22,7 +30,11 @@ from backend.documents.storage import (
 )
 
 __all__ = [
+    "DeterministicDocumentExtractor",
     "DocumentDeleteResult",
+    "DocumentExtractionError",
+    "DocumentExtractionPolicy",
+    "DocumentExtractionResult",
     "DocumentFormat",
     "DocumentIntakeDescriptor",
     "DocumentIntakeError",
@@ -36,6 +48,8 @@ __all__ = [
     "DocumentStorageError",
     "DocumentUploadResult",
     "DocumentWorkspaceError",
+    "ExtractedTextUnit",
+    "ExtractionUnitKind",
     "ManagedDocumentStorage",
     "StoredDocument",
 ]

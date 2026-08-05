@@ -101,13 +101,29 @@ core и сохраняет независимость storage boundary от Fast
 Публичный API не возвращает `storage_key`, raw bytes или извлечённый текст.
 Deleted tombstones и event evidence остаются внутри registry/audit boundary.
 
-### P3-001.3 — Deterministic Text Extraction
+## P3-001.3a — Deterministic Text Extraction Core
 
-- PDF, DOCX, XLSX и TXT loaders/parsers;
-- page/sheet/paragraph provenance;
-- bounded chunks;
-- extraction status and failure evidence;
-- без OCR fallback на этом этапе.
+Реализуются независимые от БД loaders/parsers:
+
+- PDF через `pypdf` с page provenance;
+- DOCX через `python-docx` с paragraph/table-cell provenance;
+- XLSX через `openpyxl` с sheet/cell provenance;
+- TXT через intake encoding marker;
+- NFKC и стабильная нормализация переводов строк;
+- SHA-256 каждого unit и всего канонического extracted text;
+- deterministic parser version;
+- fail-closed limits по pages, paragraphs, tables, rows, cells, units и chars;
+- формулы XLSX сохраняются как формулы и не пересчитываются;
+- OCR, LLM, embeddings и persistence не запускаются.
+
+## P3-001.3b — Extraction Persistence and API
+
+- Alembic extraction runs/units;
+- pending/running/completed/failed status;
+- failure evidence без raw content;
+- Workspace-scoped extract/get routes;
+- cascade cleanup derived text при удалении документа;
+- bounded chunk materialization.
 
 ### P3-001.4 — OCR and Sensitive Derived Content
 
