@@ -16,6 +16,7 @@ from fastapi import (
 )
 
 from backend.api.dependencies import (
+    get_document_extraction_service,
     get_document_registry_service,
     get_workspace_policy_service,
 )
@@ -28,6 +29,12 @@ from backend.control_center.security import (
     enforce_workspace_value,
     require_permission,
     security_http_exception,
+)
+from backend.documents.extraction_service import (
+    DocumentExtractionConflictError,
+    DocumentExtractionNotFoundError,
+    DocumentExtractionService,
+    DocumentExtractionServiceError,
 )
 from backend.documents.intake import (
     DocumentIntakeError,
@@ -91,6 +98,35 @@ def _translate_error(exc: Exception) -> HTTPException:
         return HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Managed document storage operation failed.",
+        )
+
+    if isinstance(
+        exc,
+        DocumentExtractionNotFoundError,
+    ):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+    if isinstance(
+        exc,
+        DocumentExtractionConflictError,
+    ):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+
+    if isinstance(
+        exc,
+        DocumentExtractionServiceError,
+    ):
+        return HTTPException(
+            status_code=(
+                status.HTTP_422_UNPROCESSABLE_CONTENT
+            ),
+            detail=str(exc),
         )
 
     if isinstance(exc, DocumentRegistryError):
@@ -304,6 +340,229 @@ def list_documents(
     }
 
 
+
+@router.post("/{document_id}/extractions")
+async def extract_document(
+    workspace_id: str,
+    document_id: str,
+    response: Response,
+    service: DocumentExtractionService = Depends(
+        get_document_extraction_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.DOCUMENT_EXTRACT.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    actor_id = _bound_actor(principal)
+
+    try:
+        result = await service.extract(
+            document_id=document_id,
+            workspace_id=workspace_id,
+            actor_id=actor_id,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+
+    if result.record.status == "failed":
+        if result.record.error_code in {
+            "DOCUMENT_STORAGE_MISSING",
+            "DOCUMENT_STORAGE_SIZE_MISMATCH",
+            "DOCUMENT_STORAGE_HASH_MISMATCH",
+        }:
+            response.status_code = (
+                status.HTTP_409_CONFLICT
+            )
+        elif result.record.error_code == (
+            "DOCUMENT_EXTRACTION_INTERNAL_ERROR"
+        ):
+            response.status_code = (
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        else:
+            response.status_code = (
+                status.HTTP_422_UNPROCESSABLE_CONTENT
+            )
+    else:
+        response.status_code = (
+            status.HTTP_201_CREATED
+            if result.created
+            else status.HTTP_200_OK
+        )
+
+    return {
+        "created": result.created,
+        "reused": result.reused,
+        "extraction": result.record.to_public_dict(),
+    }
+
+
+@router.get("/{document_id}/extractions")
+def list_document_extractions(
+    workspace_id: str,
+    document_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: DocumentExtractionService = Depends(
+        get_document_extraction_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.DOCUMENT_VIEW.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    try:
+        items = service.list_runs(
+            document_id=document_id,
+            workspace_id=workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+
+    return {
+        "workspace_id": workspace_id,
+        "document_id": document_id,
+        "items": [
+            item.to_public_dict()
+            for item in items
+        ],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/{document_id}/extractions/{run_id}")
+def get_document_extraction(
+    workspace_id: str,
+    document_id: str,
+    run_id: str,
+    service: DocumentExtractionService = Depends(
+        get_document_extraction_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.DOCUMENT_VIEW.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    try:
+        record = service.get(
+            run_id=run_id,
+            document_id=document_id,
+            workspace_id=workspace_id,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+    return record.to_public_dict()
+
+
+@router.get(
+    "/{document_id}/extractions/{run_id}/units"
+)
+def list_document_extraction_units(
+    workspace_id: str,
+    document_id: str,
+    run_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: DocumentExtractionService = Depends(
+        get_document_extraction_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.DOCUMENT_VIEW.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    try:
+        items = service.list_units(
+            run_id=run_id,
+            document_id=document_id,
+            workspace_id=workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+    return {
+        "workspace_id": workspace_id,
+        "document_id": document_id,
+        "run_id": run_id,
+        "items": [
+            item.to_public_dict()
+            for item in items
+        ],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get(
+    "/{document_id}/extractions/{run_id}/chunks"
+)
+def list_document_extraction_chunks(
+    workspace_id: str,
+    document_id: str,
+    run_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: DocumentExtractionService = Depends(
+        get_document_extraction_service
+    ),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.DOCUMENT_VIEW.value
+        )
+    ),
+) -> dict[str, Any]:
+    workspace_id = _bound_workspace(
+        workspace_id,
+        principal,
+    )
+    try:
+        items = service.list_chunks(
+            run_id=run_id,
+            document_id=document_id,
+            workspace_id=workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _translate_error(exc) from exc
+    return {
+        "workspace_id": workspace_id,
+        "document_id": document_id,
+        "run_id": run_id,
+        "items": [
+            item.to_public_dict()
+            for item in items
+        ],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @router.get("/{document_id}/events")
 def get_document_events(
     workspace_id: str,
@@ -398,5 +657,8 @@ async def delete_document(
     return {
         "deleted": result.deleted,
         "storage_deleted": result.storage_deleted,
+        "derived_deleted": dict(
+            result.derived_deleted
+        ),
         "document": result.record.to_public_dict(),
     }

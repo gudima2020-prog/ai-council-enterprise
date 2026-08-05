@@ -1,7 +1,7 @@
 # AI Studio Enterprise — Roadmap
 
 Версия плана: **0.16.0**
-Дата обновления: **2026-08-04**
+Дата обновления: **2026-08-05**
 
 ## Phase 1 — Enterprise Core
 
@@ -153,7 +153,8 @@
 - P3-001.2a: Workspace registry и content-addressed managed storage;
 - P3-001.2b: Human Control-bound multipart REST API;
 - P3-001.3a: deterministic PDF/DOCX/XLSX/TXT extraction core;
-- далее: extraction persistence/API, OCR, summaries и Documents UI.
+- P3-001.3b: persisted extraction runs, units, chunks and Workspace API;
+- далее: OCR, summaries, citations и Documents UI.
 
 Остальные направления:
 

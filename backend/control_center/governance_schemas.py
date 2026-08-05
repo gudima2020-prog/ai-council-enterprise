@@ -46,6 +46,7 @@ class HumanControlPermission(StrEnum):
     EVIDENCE_EXPORT = "human_control.evidence.export"
     DOCUMENT_VIEW = "document.view"
     DOCUMENT_UPLOAD = "document.upload"
+    DOCUMENT_EXTRACT = "document.extract"
     DOCUMENT_DELETE = "document.delete"
     DOCUMENT_AUDIT = "document.audit"
     SECRET_VIEW = "secret.view"

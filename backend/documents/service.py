@@ -18,6 +18,7 @@ from backend.documents.models import (
     DocumentEventModel,
     DocumentModel,
 )
+from backend.documents.extraction_repository import DocumentExtractionRepository
 from backend.documents.repository import DocumentRepository
 from backend.documents.storage import (
     DocumentStorageError,
@@ -136,6 +137,7 @@ class DocumentDeleteResult:
     record: DocumentRecord
     deleted: bool
     storage_deleted: bool
+    derived_deleted: dict[str, int]
 
 
 class DocumentRegistryService:
@@ -381,8 +383,21 @@ class DocumentRegistryService:
                 record=self._to_record(row),
                 deleted=False,
                 storage_deleted=False,
+                derived_deleted={
+                    "runs": 0,
+                    "units": 0,
+                    "chunks": 0,
+                },
             )
 
+        derived_deleted = (
+            DocumentExtractionRepository(
+                self._session
+            ).delete_derived(
+                document_id=row.id,
+                workspace_id=row.workspace_id,
+            )
+        )
         active_references = (
             self._repository.active_storage_references(
                 storage_key=row.storage_key,
@@ -411,6 +426,9 @@ class DocumentRegistryService:
             "shared_storage_references": (
                 active_references
             ),
+            "derived_deleted": dict(
+                derived_deleted
+            ),
         }
         self._repository.append_event(
             document=row,
@@ -434,6 +452,9 @@ class DocumentRegistryService:
             record=self._to_record(row),
             deleted=True,
             storage_deleted=storage_deleted,
+            derived_deleted=dict(
+                derived_deleted
+            ),
         )
 
     def events(

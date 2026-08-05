@@ -118,12 +118,25 @@ Deleted tombstones и event evidence остаются внутри registry/audi
 
 ## P3-001.3b — Extraction Persistence and API
 
-- Alembic extraction runs/units;
-- pending/running/completed/failed status;
-- failure evidence без raw content;
-- Workspace-scoped extract/get routes;
-- cascade cleanup derived text при удалении документа;
-- bounded chunk materialization.
+Реализованы:
+
+- Alembic revision `20260805_0055`;
+- Workspace-isolated extraction runs со статусами
+  `pending`, `running`, `completed`, `failed`;
+- idempotent exact-run key по document, source SHA-256 и parser version;
+- безопасный retry failed run с увеличением `attempt_count`;
+- persisted extraction units с page/paragraph/table-cell/sheet/cell provenance;
+- deterministic overlapping chunks с source unit ordinals;
+- SHA-256 extracted text, units и chunks;
+- bounded list endpoints для runs, units и chunks;
+- permission `document.extract` и authenticated actor binding;
+- persisted failure evidence без raw bytes или extracted text;
+- metadata-only Event Bus события `document.extraction.completed` и
+  `document.extraction.failed`;
+- удаление runs, units и chunks при tombstone deletion документа;
+- OpenAPI, persistence, isolation, retry и cleanup tests.
+
+OCR, embeddings и отправка extracted text в LLM на этом этапе не выполняются.
 
 ### P3-001.4 — OCR and Sensitive Derived Content
 

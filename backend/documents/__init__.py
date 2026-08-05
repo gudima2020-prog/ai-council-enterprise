@@ -1,3 +1,9 @@
+from backend.documents.chunking import (
+    DeterministicDocumentChunker,
+    DocumentChunkingError,
+    DocumentChunkingPolicy,
+    DocumentTextChunk,
+)
 from backend.documents.extraction import (
     DeterministicDocumentExtractor,
     DocumentExtractionError,
@@ -5,6 +11,16 @@ from backend.documents.extraction import (
     DocumentExtractionResult,
     ExtractedTextUnit,
     ExtractionUnitKind,
+)
+from backend.documents.extraction_service import (
+    DocumentExtractionChunkRecord,
+    DocumentExtractionConflictError,
+    DocumentExtractionExecutionResult,
+    DocumentExtractionNotFoundError,
+    DocumentExtractionRunRecord,
+    DocumentExtractionService,
+    DocumentExtractionServiceError,
+    DocumentExtractionUnitRecord,
 )
 from backend.documents.intake import (
     DocumentFormat,
@@ -30,11 +46,22 @@ from backend.documents.storage import (
 )
 
 __all__ = [
+    "DeterministicDocumentChunker",
     "DeterministicDocumentExtractor",
+    "DocumentChunkingError",
+    "DocumentChunkingPolicy",
     "DocumentDeleteResult",
+    "DocumentExtractionChunkRecord",
+    "DocumentExtractionConflictError",
     "DocumentExtractionError",
+    "DocumentExtractionExecutionResult",
+    "DocumentExtractionNotFoundError",
     "DocumentExtractionPolicy",
     "DocumentExtractionResult",
+    "DocumentExtractionRunRecord",
+    "DocumentExtractionService",
+    "DocumentExtractionServiceError",
+    "DocumentExtractionUnitRecord",
     "DocumentFormat",
     "DocumentIntakeDescriptor",
     "DocumentIntakeError",
@@ -46,6 +73,7 @@ __all__ = [
     "DocumentRegistryError",
     "DocumentRegistryService",
     "DocumentStorageError",
+    "DocumentTextChunk",
     "DocumentUploadResult",
     "DocumentWorkspaceError",
     "ExtractedTextUnit",

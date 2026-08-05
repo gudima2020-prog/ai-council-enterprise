@@ -37,8 +37,8 @@ def test_alembic_has_exactly_one_head() -> None:
     assert head_revision() == heads[0]
 
 
-def test_document_registry_is_current_head() -> None:
-    assert head_revision() == "20260804_0054"
+def test_document_extraction_is_current_head() -> None:
+    assert head_revision() == "20260805_0055"
 
 
 
@@ -67,7 +67,7 @@ def test_alembic_cli_respects_ai_studio_database_path(tmp_path: Path) -> None:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-    assert revision == ("20260804_0054",)
+    assert revision == ("20260805_0055",)
     assert "code_sandbox_sessions" in tables
     assert "code_sandbox_approvals" in tables
     assert "code_sandbox_agent_runs" in tables
@@ -76,6 +76,9 @@ def test_alembic_cli_respects_ai_studio_database_path(tmp_path: Path) -> None:
     assert "policy_approval_evidence" in tables
     assert "documents" in tables
     assert "document_events" in tables
+    assert "document_extraction_runs" in tables
+    assert "document_extraction_units" in tables
+    assert "document_extraction_chunks" in tables
 
 
 def _sqlite_engine(tmp_path: Path, name: str) -> Engine:
