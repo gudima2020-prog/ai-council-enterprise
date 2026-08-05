@@ -22,6 +22,7 @@ from backend.secrets import models as secret_models  # noqa: F401
 from backend.council import models as council_models  # noqa: F401
 from backend.code_sandbox import models as code_sandbox_models  # noqa: F401
 from backend.policy_approvals import models as policy_approval_models  # noqa: F401
+from backend.documents import models as document_models  # noqa: F401
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

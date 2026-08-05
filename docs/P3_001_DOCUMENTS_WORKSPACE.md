@@ -61,14 +61,34 @@ backend/documents/
 
 ## План следующих подэтапов
 
-### P3-001.2 — Document Registry and Storage
+## P3-001.2a — Document Registry and Managed Storage Core
 
-- Alembic migration;
-- Workspace-isolated document records;
-- content-addressed managed storage;
-- upload/list/get/delete API;
-- persisted upload/delete events;
-- удаление документа и всех связанных производных данных.
+Реализованы:
+
+- Alembic revision `20260804_0054`;
+- Workspace-isolated registry с active/deleted tombstone lifecycle;
+- content-addressed managed storage по SHA-256;
+- atomic temporary write + `os.replace`;
+- verified read и fail-closed detection повреждённых blobs;
+- дедупликация blobs между Workspace при раздельных registry records;
+- безопасное удаление blob только после последней active-ссылки;
+- восстановление ранее удалённого exact document scope;
+- append-only SHA-256 chain событий `document.uploaded` и
+  `document.deleted` без raw bytes/content;
+- in-process Event Bus publication с безопасным payload;
+- internal upload/list/get/read/delete service contract.
+
+HTTP multipart upload, authentication/permissions и публичные API routes
+переносятся в P3-001.2b. Это не требует `python-multipart` в persistence
+core и сохраняет независимость storage boundary от FastAPI.
+
+## P3-001.2b — Document Registry REST API
+
+- Workspace-scoped multipart upload;
+- Human Control permissions и authenticated actor binding;
+- list/get/delete/events routes;
+- safe error mapping и bounded request handling;
+- OpenAPI and end-to-end tests.
 
 ### P3-001.3 — Deterministic Text Extraction
 

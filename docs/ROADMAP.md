@@ -150,7 +150,8 @@
 Статус: **разработка начата**.
 
 - P3-001.1: safe intake core для PDF, DOCX, XLSX и TXT;
-- далее: registry/storage, extraction, OCR, summaries и Documents UI.
+- P3-001.2a: Workspace registry и content-addressed managed storage;
+- далее: REST API, extraction, OCR, summaries и Documents UI.
 
 Остальные направления:
 

@@ -16,6 +16,7 @@ from backend.secrets import models as secret_models
 from backend.council import models as council_models
 from backend.code_sandbox import models as code_sandbox_models
 from backend.policy_approvals import models as policy_approval_models
+from backend.documents import models as document_models
 config=context.config
 if config.config_file_name:fileConfig(config.config_file_name)
 target_metadata=Base.metadata
