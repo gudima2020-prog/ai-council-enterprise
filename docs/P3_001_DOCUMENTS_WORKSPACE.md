@@ -2,7 +2,9 @@
 
 ## Статус
 
-P3-001 начат с подэтапа **P3-001.1 Safe Document Intake Core**.
+P3-001 находится в активной разработке. Текущий рабочий подэтап —
+**P3-001.4a Isolated PDF OCR Core**. Стабильной контрольной точкой проекта
+остаётся `0.16.0 / P2-012` до завершения всего Documents Workspace release.
 
 Documents Workspace должен поддерживать PDF, DOCX, XLSX и TXT, извлечение
 текста и передачу только явно выбранного контента в AI Gateway. OCR, таблицы,
@@ -138,12 +140,60 @@ Deleted tombstones и event evidence остаются внутри registry/audi
 
 OCR, embeddings и отправка extracted text в LLM на этом этапе не выполняются.
 
-### P3-001.4 — OCR and Sensitive Derived Content
+### P3-001.4a — Isolated PDF OCR Core
 
-- isolated OCR execution;
-- page image limits;
-- OCR text inherits document classification;
-- explicit retention and deletion semantics.
+Реализованы:
+
+- PDF OCR только через отдельный Docker runtime;
+- trusted runtime image label и исполнение по immutable image ID;
+- `network=none`, read-only root/input, capability drop,
+  `no-new-privileges`, CPU/RAM/PID/time limits;
+- PDFium rendering и Tesseract OCR внутри контейнера, а не в API process;
+- English/Russian language packs с безопасным allowlist форматом;
+- явный 1-based page selection, сортировка и дедупликация страниц;
+- fail-closed limits по PDF pages, selected pages, page/total pixels,
+  PNG bytes, page/total text characters и runtime timeout;
+- page images существуют только в container tmpfs и удаляются до выхода;
+- временная host-копия исходного PDF удаляется после runtime call;
+- OCR text наследует classification исходного документа;
+- SHA-256 source PDF, page PNG, page text и канонического OCR text;
+- metadata-only errors без raw PDF, page image или OCR text;
+- host-side строгая проверка типов, image ID/version, error/warning allowlist,
+  runtime metadata и limits;
+- build/smoke script `prepare_p3_001_4a_ocr_runtime.bat`;
+- deterministic core и Docker protocol tests.
+
+Runtime настраивается через `AI_STUDIO_OCR_ENABLED`,
+`AI_STUDIO_OCR_IMAGE`, опциональные `AI_STUDIO_DOCKER_EXECUTABLE` и
+`AI_STUDIO_OCR_TEMP_ROOT`. Образ должен иметь exact labels
+`org.ai-studio.ocr-runtime=p3-001.4a` и
+`org.ai-studio.ocr-version=5-v1`; исполнение выполняется по проверенному
+`sha256:<64 hex>` image ID.
+
+Проверка core от 2026-08-05:
+
+- OCR targeted tests: **20 passed**;
+- Documents Workspace targeted tests: **99 passed**;
+- full backend regression: **553 passed, 2 known warnings**;
+- frontend TypeScript/Vite production build: **PASSED**;
+- synthetic PDFium/Tesseract runner smoke test: **PASSED**.
+
+Сборка и smoke test именно Docker-образа выполняются на целевом Windows-host
+через `prepare_p3_001_4a_ocr_runtime.bat`, поскольку Docker daemon не входил
+в среду core-проверки.
+
+OCR persistence, API routes и retention records на этом подэтапе не
+создаются.
+
+### P3-001.4b — OCR Persistence, Retention and API
+
+- Workspace-scoped OCR runs/pages;
+- pending/running/completed/failed status и safe retry;
+- explicit page selection и blank-page recommendation;
+- sensitive derived-content classification и retention policy;
+- bounded OCR page/result API;
+- deletion of OCR text together with the source document;
+- metadata-only audit/Event Bus evidence.
 
 ### P3-001.5 — Summaries, Questions and Citations
 
