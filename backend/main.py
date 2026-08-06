@@ -21,6 +21,7 @@ from backend.routers import (
     chat,
     code_sandbox,
     council,
+    document_ai,
     documents,
     container,
     context,
@@ -796,6 +797,7 @@ app.include_router(chat.router, prefix="/api")
 app.include_router(code_sandbox.router, prefix="/api")
 app.include_router(council.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
+app.include_router(document_ai.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(execution_distribution.router, prefix="/api")
 app.include_router(execution_observability.router, prefix="/api")

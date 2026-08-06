@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.core.events import Event, EventBus
 from backend.database.models import WorkspaceModel
+from backend.documents.ai_repository import DocumentAIAnalysisRepository
 from backend.documents.extraction_repository import DocumentExtractionRepository
 from backend.documents.intake import (
     DocumentIntakeDescriptor,
@@ -387,9 +388,19 @@ class DocumentRegistryService:
                     "runs": 0,
                     "units": 0,
                     "chunks": 0,
+                    "ocr_runs": 0,
+                    "ocr_pages": 0,
+                    "ai_runs": 0,
+                    "ai_citations": 0,
                 },
             )
 
+        ai_deleted = DocumentAIAnalysisRepository(
+            self._session
+        ).delete_derived(
+            document_id=row.id,
+            workspace_id=row.workspace_id,
+        )
         derived_deleted = (
             DocumentExtractionRepository(
                 self._session
@@ -406,6 +417,8 @@ class DocumentRegistryService:
         )
         if any(ocr_deleted.values()):
             derived_deleted.update(ocr_deleted)
+        if any(ai_deleted.values()):
+            derived_deleted.update(ai_deleted)
         active_references = (
             self._repository.active_storage_references(
                 storage_key=row.storage_key,

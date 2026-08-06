@@ -454,6 +454,9 @@ class AIGateway:
         approval_id: str | None = None,
         approval_token: str | None = None,
         timeout_seconds: int | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        data_classification: str | None = None,
     ) -> GatewayResponse:
         selected_provider = provider or self._settings.default_provider
         selected_model = model or self._settings.default_model
@@ -464,8 +467,16 @@ class AIGateway:
             ],
             model=selected_model,
             provider=selected_provider,
-            temperature=self._settings.temperature,
-            max_tokens=self._settings.max_tokens,
+            temperature=(
+                self._settings.temperature
+                if temperature is None
+                else temperature
+            ),
+            max_tokens=(
+                self._settings.max_tokens
+                if max_tokens is None
+                else max_tokens
+            ),
             timeout_seconds=(
                 timeout_seconds
                 if timeout_seconds is not None
@@ -474,6 +485,7 @@ class AIGateway:
             source=source,
             mode=mode,
             workspace_id=workspace_id,
+            data_classification=data_classification,
             correlation_id=correlation_id,
         )
         if request_id is not None:
@@ -711,6 +723,9 @@ class AIGateway:
         approval_id: str | None = None,
         approval_token: str | None = None,
         timeout_seconds: int | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        data_classification: str | None = None,
         cancellation_check: Callable[[], bool] | None = None,
     ) -> GatewayResponse:
         selected_provider = provider or self._settings.default_provider
@@ -722,8 +737,16 @@ class AIGateway:
             ],
             model=selected_model,
             provider=selected_provider,
-            temperature=self._settings.temperature,
-            max_tokens=self._settings.max_tokens,
+            temperature=(
+                self._settings.temperature
+                if temperature is None
+                else temperature
+            ),
+            max_tokens=(
+                self._settings.max_tokens
+                if max_tokens is None
+                else max_tokens
+            ),
             timeout_seconds=(
                 timeout_seconds
                 if timeout_seconds is not None
@@ -732,6 +755,7 @@ class AIGateway:
             source=source,
             mode=mode,
             workspace_id=workspace_id,
+            data_classification=data_classification,
             correlation_id=correlation_id,
         )
         if request_id is not None:

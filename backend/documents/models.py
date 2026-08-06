@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -901,6 +902,401 @@ class DocumentOCRPageModel(Base):
         JSON,
         nullable=False,
         default=list,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+
+class DocumentAIAnalysisRunModel(Base):
+    __tablename__ = "document_ai_analysis_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "workflow IN ('summary', 'question')",
+            name="ck_document_ai_analysis_runs_workflow",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'awaiting_primary_approval', "
+            "'primary_running', 'awaiting_reviewer', "
+            "'awaiting_reviewer_approval', 'reviewer_running', "
+            "'completed', 'rejected', 'failed')",
+            name="ck_document_ai_analysis_runs_status",
+        ),
+        CheckConstraint(
+            "content_state IN ('active', 'purged')",
+            name="ck_document_ai_analysis_runs_content_state",
+        ),
+        CheckConstraint(
+            "retention_days >= 1 AND retention_days <= 3650",
+            name="ck_document_ai_analysis_runs_retention_days",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_document_ai_analysis_runs_attempt_count",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "idempotency_key",
+            name="uq_document_ai_analysis_runs_idempotency",
+        ),
+        UniqueConstraint(
+            "primary_request_id",
+            name="uq_document_ai_analysis_runs_primary_request",
+        ),
+        UniqueConstraint(
+            "reviewer_request_id",
+            name="uq_document_ai_analysis_runs_reviewer_request",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+        default=lambda: new_id("document_ai"),
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    workflow: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="pending",
+        index=True,
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        index=True,
+    )
+    request_fingerprint: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    selection_fingerprint: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    selected_sources_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+    context_manifest_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    context_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    effective_classification: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        index=True,
+    )
+    primary_provider: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    primary_model: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+    primary_request_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    reviewer_provider: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    reviewer_model: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+    reviewer_request_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    provider_trust_json: Mapped[dict[str, str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    external_provider_acknowledged: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    request_text: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    request_text_sha256: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    output_text: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    output_text_sha256: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    output_citation_ids_json: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+    content_state: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="active",
+        index=True,
+    )
+    content_purged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    reviewer_verdict_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    reviewer_response_sha256: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    runtime_policy_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    approval_evidence_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    provider_evidence_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    error_code: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    error_message: Mapped[str | None] = mapped_column(
+        String(2000),
+        nullable=True,
+    )
+    error_details_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    retention_policy: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    retention_days: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    retention_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    requested_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class DocumentAIAnalysisCitationModel(Base):
+    __tablename__ = "document_ai_analysis_citations"
+    __table_args__ = (
+        CheckConstraint(
+            "citation_ordinal >= 1",
+            name="ck_document_ai_analysis_citations_ordinal",
+        ),
+        CheckConstraint(
+            "source_ordinal >= 0",
+            name="ck_document_ai_analysis_citations_source_ordinal",
+        ),
+        CheckConstraint(
+            "fragment_index >= 1 AND fragment_count >= fragment_index",
+            name="ck_document_ai_analysis_citations_fragment",
+        ),
+        CheckConstraint(
+            "character_start >= 0 AND character_end >= character_start",
+            name="ck_document_ai_analysis_citations_range",
+        ),
+        CheckConstraint(
+            "estimated_tokens >= 0",
+            name="ck_document_ai_analysis_citations_tokens",
+        ),
+        UniqueConstraint(
+            "analysis_run_id",
+            "citation_id",
+            name="uq_document_ai_analysis_citations_id",
+        ),
+        UniqueConstraint(
+            "analysis_run_id",
+            "citation_ordinal",
+            name="uq_document_ai_analysis_citations_ordinal",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+        default=lambda: new_id("document_ai_citation"),
+    )
+    analysis_run_id: Mapped[str] = mapped_column(
+        ForeignKey("document_ai_analysis_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    citation_id: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        index=True,
+    )
+    citation_ordinal: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("documents.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    source_run_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    source_kind: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        index=True,
+    )
+    source_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    source_ordinal: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    classification: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        index=True,
+    )
+    source_text_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    fragment_text_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    fragment_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    fragment_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    character_start: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    character_end: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    estimated_tokens: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    locators_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+    injection_finding_codes_json: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+    used_in_output: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

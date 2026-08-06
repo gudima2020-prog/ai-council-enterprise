@@ -23,6 +23,7 @@ class GatewayRequest:
     mode: str = "universal"
     project_id: str | None = None
     workspace_id: str | None = None
+    data_classification: str | None = None
     correlation_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     request_id: str = field(default_factory=lambda: f"ai_req_{uuid.uuid4().hex}")

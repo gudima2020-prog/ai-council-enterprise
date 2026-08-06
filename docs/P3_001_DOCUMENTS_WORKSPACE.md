@@ -281,15 +281,47 @@ P3-001.5a не читает БД, не сохраняет manifest, не соз�
 
 ### P3-001.5b — Gateway Summaries, Questions and Citations
 
-- Workspace-scoped resolver только явно выбранных persisted sources;
-- persisted request/context/output evidence без raw content в audit payload;
-- bounded summary/question API и idempotency;
-- AI Gateway only и повторный model capability/context preflight;
-- explicit external-provider warning до запроса;
-- effective classification, Runtime Policy и one-time approval enforcement;
-- structured citation validation и отказ от неподтверждённых ссылок;
-- independent reviewer для citation coverage и policy compliance;
-- provider usage/cost/error evidence и retention cleanup.
+Реализован governed pipeline поверх P3-001.5a:
+
+- Workspace-scoped resolver читает только точные явно выбранные persisted
+  extraction units/chunks и OCR pages, проверяет active document binding,
+  run state, OCR retention, provenance, character count и SHA-256;
+- migration `20260806_0057` сохраняет idempotent analysis runs и отдельные
+  typed citation evidence rows; question/answer хранятся только в content
+  columns, а Event Bus, errors и audit evidence остаются metadata-only;
+- bounded `/document-ai/preflight` и `/document-ai/runs` API поддерживает
+  summary/question, list/get, explicit content retrieval и retention purge;
+- разрешены только explicit provider/model routes; primary и independent
+  reviewer обязаны использовать разные models с `supports_json`, известным
+  context window и допустимым output limit;
+- model capability/context preflight повторяется непосредственно перед каждым
+  Gateway call; effective source classification передаётся в Gateway как
+  non-downgrade override Workspace classification;
+- external provider warning возвращается до запроса, а execution требует
+  явного acknowledgement;
+- Runtime Policy выполняется до вызова и повторно в AI Gateway; confidential
+  trusted-external primary/reviewer используют разные exact-scope request IDs
+  и отдельные one-time Human Control approvals;
+- primary response допускает только strict JSON `answer/citation_ids`, требует
+  хотя бы одну persisted citation и отвергает duplicate, invented или
+  unsupported identifiers;
+- отдельный reviewer Gateway request проверяет citation coverage и policy
+  compliance; непротиворечивый approval обязателен для completed status, а
+  primary output не выдаётся через API до успешного reviewer verdict;
+- persisted provider evidence включает usage, latency, cost, error code,
+  Runtime Policy и approval metadata, но никогда approval token или raw prompt;
+- classification retention очищает question/answer, сохраняя hashes, manifest,
+  citations и decision evidence; удаление любого исходного документа удаляет
+  весь зависимый multi-document analysis run.
+
+Локальная проверка до Windows release gate:
+
+- P3-001.5b core/resolver/persistence/service/API/Gateway contracts: PASSED;
+- Documents/Gateway targeted regression: **216 passed, 1 known warning**;
+- migration round-trip to head `20260806_0057`: PASSED.
+
+Полный backend regression и frontend build должны быть подтверждены на
+целевом Windows-host скриптом `verify_p3_001_5b.bat` до staging/commit.
 
 ### P3-001.6 — Documents UI and Release
 

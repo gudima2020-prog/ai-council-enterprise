@@ -158,7 +158,9 @@
 - P3-001.4b: Workspace OCR persistence, retention, retry and bounded API;
 - P3-001.5a: explicit local AI context, conservative token budget,
   prompt-injection warnings и exact citation core;
-- далее: Gateway summaries/questions/citations и Documents UI.
+- P3-001.5b: governed summary/question Gateway pipeline, persisted evidence,
+  exact citations, independent reviewer, one-time approvals и retention;
+- далее: Documents UI and release.
 
 ### P3-002 — Governed Developer Agent Profiles
 

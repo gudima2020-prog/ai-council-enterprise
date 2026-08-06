@@ -1,8 +1,12 @@
-from backend.documents.chunking import (
-    DeterministicDocumentChunker,
-    DocumentChunkingError,
-    DocumentChunkingPolicy,
-    DocumentTextChunk,
+from backend.documents.ai_analysis import (
+    DocumentAIAnalysisError,
+    DocumentAIPrimaryResponse,
+    DocumentAIResponseContract,
+    DocumentAIReviewerCoverage,
+    DocumentAIReviewerVerdict,
+    DocumentAIWorkflow,
+    build_primary_prompts,
+    build_reviewer_prompts,
 )
 from backend.documents.ai_context import (
     ConservativeTokenEstimator,
@@ -25,6 +29,24 @@ from backend.documents.ai_context import (
     DocumentInjectionScan,
     DocumentInjectionSeverity,
     LocalPromptInjectionScanner,
+)
+from backend.documents.ai_resolver import DocumentAIContextResolver
+from backend.documents.ai_service import (
+    DocumentAIAnalysisRecord,
+    DocumentAIAnalysisService,
+    DocumentAIApprovalCredentials,
+    DocumentAIExecutionResult,
+    DocumentAIModelSnapshot,
+    DocumentAIPreflightResult,
+    DocumentAIRequestSpec,
+    DocumentAIRetentionPolicy,
+    DocumentAIStagePolicy,
+)
+from backend.documents.chunking import (
+    DeterministicDocumentChunker,
+    DocumentChunkingError,
+    DocumentChunkingPolicy,
+    DocumentTextChunk,
 )
 from backend.documents.extraction import (
     DeterministicDocumentExtractor,
@@ -95,10 +117,26 @@ __all__ = [
     "DeterministicDocumentAIContextBuilder",
     "DeterministicDocumentChunker",
     "DeterministicDocumentExtractor",
+    "DocumentAIAnalysisError",
+    "DocumentAIAnalysisRecord",
+    "DocumentAIAnalysisService",
+    "DocumentAIApprovalCredentials",
     "DocumentAIContextError",
     "DocumentAIContextManifest",
     "DocumentAIContextPolicy",
+    "DocumentAIContextResolver",
     "DocumentAIContextResult",
+    "DocumentAIExecutionResult",
+    "DocumentAIModelSnapshot",
+    "DocumentAIPreflightResult",
+    "DocumentAIPrimaryResponse",
+    "DocumentAIRequestSpec",
+    "DocumentAIResponseContract",
+    "DocumentAIRetentionPolicy",
+    "DocumentAIReviewerCoverage",
+    "DocumentAIReviewerVerdict",
+    "DocumentAIStagePolicy",
+    "DocumentAIWorkflow",
     "DocumentChunkingError",
     "DocumentChunkingPolicy",
     "DocumentCitationLocationKind",
@@ -164,4 +202,6 @@ __all__ = [
     "OCRRuntimeStatus",
     "PDFOCRRuntime",
     "StoredDocument",
+    "build_primary_prompts",
+    "build_reviewer_prompts",
 ]

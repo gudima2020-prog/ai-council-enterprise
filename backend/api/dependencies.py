@@ -20,6 +20,7 @@ from backend.council.history import CouncilHistoryService
 from backend.council.live import CouncilLiveManager
 from backend.council.repository import CouncilRunRepository
 from backend.database.session import session_scope
+from backend.documents.ai_service import DocumentAIAnalysisService
 from backend.documents.extraction_service import (
     DocumentExtractionService,
 )
@@ -86,6 +87,22 @@ def get_document_ocr_service(
     return DocumentOCRService(
         session=session,
         event_bus=container.event_bus,
+    )
+
+
+def get_document_ai_analysis_service(
+    session: Session = Depends(get_db_session),
+    container: AppContainer = Depends(get_container),
+) -> DocumentAIAnalysisService:
+    return DocumentAIAnalysisService(
+        session=session,
+        event_bus=container.event_bus,
+        gateway=build_ai_gateway(
+            settings=container.settings,
+            event_bus=container.event_bus,
+            secret_manager=container.secret_manager_service,
+        ),
+        workspace_policy=container.workspace_policy_service(session),
     )
 
 

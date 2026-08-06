@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ============================================================
-echo AI Studio Enterprise - P3-001.5a context core verification
+echo AI Studio Enterprise - P3-001.5b document AI verification
 echo ============================================================
 
 if not exist ".venv\Scripts\python.exe" (
@@ -45,43 +45,38 @@ if errorlevel 1 exit /b 1
 echo.
 echo Python compile check:
 python -m py_compile ^
+  backend\documents\ai_analysis.py ^
   backend\documents\ai_context.py ^
-  backend\documents\__init__.py
+  backend\documents\ai_repository.py ^
+  backend\documents\ai_resolver.py ^
+  backend\documents\ai_service.py ^
+  backend\documents\models.py ^
+  backend\gateway\policy.py ^
+  backend\gateway\service.py ^
+  backend\routers\document_ai.py
 if errorlevel 1 exit /b 1
 
 echo.
-echo Database migration head compatibility check:
+echo Database migration head check:
 python -m alembic heads | findstr /C:"20260806_0057"
 if errorlevel 1 (
-  echo ERROR: expected compatible Alembic head 20260806_0057.
+  echo ERROR: expected Alembic head 20260806_0057.
   exit /b 1
 )
 
 echo.
-echo P3-001.5a context contract check:
-python -c "from backend.documents import ConservativeTokenEstimator, DeterministicDocumentAIContextBuilder, DocumentAIContextPolicy; assert DeterministicDocumentAIContextBuilder.SCHEMA_VERSION == 'p3-001.5a-v1'; assert ConservativeTokenEstimator.ESTIMATOR_VERSION == 'utf8-byte-conservative-v1'; assert DocumentAIContextPolicy().injection_action.value == 'warn'"
+echo P3-001.5b document AI contract check:
+python -c "from backend.control_center.governance_schemas import HumanControlPermission; from backend.documents import DocumentAIResponseContract, DocumentAIWorkflow; from backend.gateway.schemas import GatewayRequest; assert DocumentAIWorkflow.QUESTION.value == 'question'; assert HumanControlPermission.DOCUMENT_AI.value == 'document.ai'; assert 'data_classification' in GatewayRequest.__dataclass_fields__; assert DocumentAIResponseContract.MAX_CITATIONS == 2000"
 if errorlevel 1 exit /b 1
 
-findstr /C:"P3-001.5a" "docs\P3_001_DOCUMENTS_WORKSPACE.md" >nul
+findstr /C:"P3-001.5b" "docs\P3_001_DOCUMENTS_WORKSPACE.md" >nul
 if errorlevel 1 (
-  echo ERROR: P3-001.5a documentation marker is missing.
-  exit /b 1
-)
-
-findstr /C:"P3-002" "docs\ROADMAP.md" >nul
-if errorlevel 1 (
-  echo ERROR: governed agent roadmap marker is missing.
-  exit /b 1
-)
-
-findstr /C:"P3-003" "docs\ROADMAP.md" >nul
-if errorlevel 1 (
-  echo ERROR: local utilities roadmap marker is missing.
+  echo ERROR: P3-001.5b documentation marker is missing.
   exit /b 1
 )
 
 echo.
-echo Documents Workspace targeted regression:
+echo Documents and Gateway targeted regression:
 python -m pytest -q ^
   tests\test_document_intake_core.py ^
   tests\test_document_registry_storage.py ^
@@ -93,6 +88,15 @@ python -m pytest -q ^
   tests\test_document_ocr_persistence.py ^
   tests\test_document_ocr_api.py ^
   tests\test_document_ai_context_core.py ^
+  tests\test_document_ai_analysis_core.py ^
+  tests\test_document_ai_resolver.py ^
+  tests\test_document_ai_persistence.py ^
+  tests\test_document_ai_service.py ^
+  tests\test_document_ai_api.py ^
+  tests\test_gateway_document_classification.py ^
+  tests\test_gateway_policy_enforcement.py ^
+  tests\test_gateway_approval_enforcement.py ^
+  tests\test_gateway_approval_coordinator.py ^
   tests\test_migration_manager.py ^
   tests\test_openapi_schema.py
 if errorlevel 1 exit /b 1
@@ -132,5 +136,5 @@ if errorlevel 1 (
 )
 
 echo.
-echo P3-001.5a verification PASSED.
+echo P3-001.5b verification PASSED.
 exit /b 0
