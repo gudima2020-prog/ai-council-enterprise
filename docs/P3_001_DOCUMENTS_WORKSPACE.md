@@ -2,9 +2,10 @@
 
 ## Статус
 
-P3-001 находится в активной разработке. Текущий завершённый подэтап —
-**P3-001.4b OCR Persistence, Retention and API**. Стабильной контрольной точкой проекта
-остаётся `0.16.0 / P2-012` до завершения всего Documents Workspace release.
+P3-001 находится в активной разработке. Текущий реализованный подэтап —
+**P3-001.5a Local AI Context and Citation Safety Core**. Стабильной контрольной
+точкой проекта остаётся `0.16.0 / P2-012` до завершения всего Documents
+Workspace release.
 
 Documents Workspace должен поддерживать PDF, DOCX, XLSX и TXT, извлечение
 текста и передачу только явно выбранного контента в AI Gateway. OCR, таблицы,
@@ -230,16 +231,65 @@ OCR runtime остаётся изолированным boundary подэтап�
 - OCR persistence/API tests: **19 passed**;
 - Documents Workspace targeted suite: **118 passed**;
 - migration manager: **9 passed**;
-- full backend regression: **572 passed, 2 known warnings**;
+- verification script aggregate: **127 passed, 1 warning**;
+- full backend regression: **571 passed, 1 skipped, 2 known warnings**;
 - frontend TypeScript/Vite production build: **PASSED**.
 
-### P3-001.5 — Summaries, Questions and Citations
+### P3-001.5a — Local AI Context and Citation Safety Core
 
-- AI Gateway only;
-- explicit external-provider warning;
-- chunked requests;
-- page/sheet citations;
-- Runtime Policy and approval enforcement.
+Реализованы независимые от БД, HTTP и provider SDK контракты:
+
+- обязательный explicit selection manifest с точной идентичностью
+  document/run/source kind/source record;
+- fail-closed Workspace validation и проверка persisted SHA-256 каждого
+  выбранного extracted chunk/unit или OCR page;
+- effective classification как наиболее строгая classification всех sources;
+- typed citations для PDF/OCR page, DOCX paragraph/table cell, XLSX
+  sheet/cell и TXT document с persisted source identity и fragment hashes;
+- deterministic fragments до 4 000 символов без молчаливого пропуска
+  выбранного текста;
+- JSON data envelope с обязательным указанием, что document content является
+  недоверенными данными, а не инструкциями;
+- model-agnostic `utf8-byte-conservative-v1` token estimate и прозрачный budget
+  по system prompt, conversation, user prompt, document context, reserved
+  output и safety margin;
+- fail-closed context-window preflight без raw content в error details;
+- bounded local prompt-injection pattern scan для English/Russian с режимами
+  `warn` и `block`, SHA-256 matched fragments и без заявления, что отсутствие
+  совпадений доказывает безопасность;
+- metadata-only public manifest, context SHA-256, selection fingerprint и
+  manifest fingerprint;
+- repository-level `AGENTS.md`, progressive-disclosure development/security/
+  migration/release policies и архитектурный план P3-002/P3-003;
+- Windows verification script `verify_p3_001_5a.bat`.
+
+Token estimate намеренно консервативен и не заменяет tokenizer конкретного
+provider/model. В P3-001.5b AI Gateway обязан повторно проверить model
+capability/context limit перед отправкой.
+
+P3-001.5a не читает БД, не сохраняет manifest, не создаёт HTTP routes, не
+вызывает LLM и не считает model cost. Эти действия относятся к следующему
+подэтапу и не могут обходить Runtime Policy.
+
+Локальная core-проверка от 2026-08-05:
+
+- P3-001.5a contract tests: **38 passed**;
+- Documents Workspace targeted regression: **165 passed, 1 known warning**.
+
+Полный backend regression и frontend build должны быть подтверждены на
+целевом Windows-host скриптом `verify_p3_001_5a.bat` до staging/commit.
+
+### P3-001.5b — Gateway Summaries, Questions and Citations
+
+- Workspace-scoped resolver только явно выбранных persisted sources;
+- persisted request/context/output evidence без raw content в audit payload;
+- bounded summary/question API и idempotency;
+- AI Gateway only и повторный model capability/context preflight;
+- explicit external-provider warning до запроса;
+- effective classification, Runtime Policy и one-time approval enforcement;
+- structured citation validation и отказ от неподтверждённых ссылок;
+- independent reviewer для citation coverage и policy compliance;
+- provider usage/cost/error evidence и retention cleanup.
 
 ### P3-001.6 — Documents UI and Release
 

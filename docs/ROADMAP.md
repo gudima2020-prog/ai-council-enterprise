@@ -156,7 +156,32 @@
 - P3-001.3b: persisted extraction runs, units, chunks and Workspace API;
 - P3-001.4a: isolated PDF OCR core with trusted Docker runtime;
 - P3-001.4b: Workspace OCR persistence, retention, retry and bounded API;
-- далее: summaries, questions, citations и Documents UI.
+- P3-001.5a: explicit local AI context, conservative token budget,
+  prompt-injection warnings и exact citation core;
+- далее: Gateway summaries/questions/citations и Documents UI.
+
+### P3-002 — Governed Developer Agent Profiles
+
+Статус: **запланировано после P3-001**.
+
+- progressive-disclosure repository policy и context checkpoints;
+- Agent Policy Profiles поверх Workspace Policy и Human Control;
+- Before/After Tool Execution enforcement hooks;
+- независимые Standards/Spec reviewer и diff-simplification gates;
+- signed, pinned и license-aware registry skills/plugins без auto-update.
+
+### P3-003 — Governed Local Utilities Workspace
+
+Статус: **запланировано после P3-002**.
+
+- enforceable Local Tool Registry и capability manifests;
+- audited PDF/document transforms без внешней передачи данных;
+- token/context/RAG inspectors и prompt-injection warning scanner;
+- response comparator/eval scorecard;
+- автоматический no-network privacy gate и Local Utilities UI.
+
+Архитектурные границы P3-002/P3-003 описаны в
+`docs/GOVERNED_AGENT_LOCAL_UTILITIES.md`.
 
 Остальные направления:
 
