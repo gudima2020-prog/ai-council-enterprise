@@ -1,7 +1,7 @@
 # AI Studio Enterprise — Roadmap
 
-Версия плана: **0.16.0**
-Дата обновления: **2026-08-04**
+Версия плана: **0.17.0**
+Дата обновления: **2026-08-06**
 
 ## Phase 1 — Enterprise Core
 
@@ -12,7 +12,7 @@
 - Autonomous Missions;
 - Human Control Center;
 - Secret Management и внешние Secret Providers;
-- Alembic head `20260731_0053`.
+- Alembic head `20260806_0057`.
 
 ## Phase 2 — Product Modules
 
@@ -145,7 +145,53 @@
 
 ## Phase 3 — Additional Workspaces
 
-- Documents: PDF, DOCX, OCR, summaries;
+### P3-001 — Documents Workspace
+
+Статус: **реализован в v0.17.0**.
+
+- P3-001.1: safe intake core для PDF, DOCX, XLSX и TXT;
+- P3-001.2a: Workspace registry и content-addressed managed storage;
+- P3-001.2b: Human Control-bound multipart REST API;
+- P3-001.3a: deterministic PDF/DOCX/XLSX/TXT extraction core;
+- P3-001.3b: persisted extraction runs, units, chunks and Workspace API;
+- P3-001.4a: isolated PDF OCR core with trusted Docker runtime;
+- P3-001.4b: Workspace OCR persistence, retention, retry and bounded API;
+- P3-001.5a: explicit local AI context, conservative token budget,
+  prompt-injection warnings и exact citation core;
+- P3-001.5b: governed summary/question Gateway pipeline, persisted evidence,
+  exact citations, independent reviewer, one-time approvals и retention;
+- P3-001.6: Workspace registry UI, upload/delete, extraction/OCR status,
+  exact preview/provenance, explicit source selection, governed analysis
+  workflow, history и release verification;
+- P3-001.6a: independent-review closure — stale preview guards, no-store
+  content boundary, exact result citations, complete external-reviewer
+  disclosure, token cleanup и persisted failed-run UI handling.
+
+### P3-002 — Governed Developer Agent Profiles
+
+Статус: **запланировано после P3-001**.
+
+- progressive-disclosure repository policy и context checkpoints;
+- Agent Policy Profiles поверх Workspace Policy и Human Control;
+- Before/After Tool Execution enforcement hooks;
+- независимые Standards/Spec reviewer и diff-simplification gates;
+- signed, pinned и license-aware registry skills/plugins без auto-update.
+
+### P3-003 — Governed Local Utilities Workspace
+
+Статус: **запланировано после P3-002**.
+
+- enforceable Local Tool Registry и capability manifests;
+- audited PDF/document transforms без внешней передачи данных;
+- token/context/RAG inspectors и prompt-injection warning scanner;
+- response comparator/eval scorecard;
+- автоматический no-network privacy gate и Local Utilities UI.
+
+Архитектурные границы P3-002/P3-003 описаны в
+`docs/GOVERNED_AGENT_LOCAL_UTILITIES.md`.
+
+Остальные направления:
+
 - Research: sources, citations, reports;
 - Browser: controlled sessions and evidence;
 - Code: repository-aware assistance;

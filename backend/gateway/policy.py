@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, ClassVar
 
 from backend.core.events import Event, EventBus
 from backend.gateway.schemas import (
@@ -46,6 +46,15 @@ class GatewayRoutePolicy:
     candidate providers are evaluated individually by the gateway loop.
     """
 
+    _CLASSIFICATION_ORDER: ClassVar[
+        dict[DataClassification, int]
+    ] = {
+        DataClassification.PUBLIC: 0,
+        DataClassification.INTERNAL: 1,
+        DataClassification.CONFIDENTIAL: 2,
+        DataClassification.RESTRICTED: 3,
+    }
+
     def __init__(
         self,
         *,
@@ -71,12 +80,13 @@ class GatewayRoutePolicy:
             return request, None
 
         try:
-            (
-                data_classification,
-                provider_trust,
-            ) = self._resolver(
+            workspace_classification, provider_trust = self._resolver(
                 request.workspace_id,
                 request.provider,
+            )
+            data_classification = self._effective_classification(
+                workspace_classification=workspace_classification,
+                requested_classification=request.data_classification,
             )
         except Exception as exc:
             policy_metadata = {
@@ -157,6 +167,25 @@ class GatewayRoutePolicy:
                 message=message,
                 policy_metadata=policy_metadata,
             ),
+        )
+
+    @classmethod
+    def _effective_classification(
+        cls,
+        *,
+        workspace_classification: DataClassification,
+        requested_classification: str | None,
+    ) -> DataClassification:
+        if not isinstance(workspace_classification, DataClassification):
+            workspace_classification = DataClassification(
+                str(workspace_classification)
+            )
+        if requested_classification is None:
+            return workspace_classification
+        requested = DataClassification(requested_classification)
+        return max(
+            (workspace_classification, requested),
+            key=cls._CLASSIFICATION_ORDER.__getitem__,
         )
 
     @staticmethod

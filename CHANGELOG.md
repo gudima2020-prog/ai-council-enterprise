@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.17.0 — P3-001 Documents Workspace — 2026-08-07
+
+- Added safe PDF/DOCX/XLSX/TXT intake, Workspace registry and content-addressed managed storage.
+- Added deterministic extraction with persisted units/chunks, provenance and document-bound cleanup.
+- Added trusted isolated PDF OCR with no-network Docker execution, page evidence and classification-aware retention.
+- Added explicit persisted-source context, conservative token budget, typed citations and prompt-injection warnings.
+- Added governed summary/question execution through the shared AI Gateway with external-provider acknowledgement.
+- Added independent reviewer enforcement and separate exact-scope one-time approvals for primary and reviewer stages.
+- Added persisted Document AI evidence, content retention/purge and fail-closed output gating until reviewer approval.
+- Added React Documents Workspace for registry, upload/delete, extraction/OCR, exact preview, source selection and history.
+- Closed the independent release review with stale-request guards, private no-store content responses, exact citation identities, complete external-reviewer disclosure and failed-run envelope handling.
+- Added `verify_p3_001_6.bat`; Alembic head is `20260806_0057`.
+
+## v0.16.0 — P2-012 Policy Approval Workflow & Decision Evidence — 2026-08-04
+
+- Added Workspace-scoped exact-subject Runtime Policy approvals and append-only decision evidence.
+- Added one-time domain-hashed capability tokens with atomic consume and bounded TTL.
+- Enforced approvals for AI Gateway routes and runtime artifact export without failover or TOCTOU bypass.
+- Added React Approval Center with queue, exact scope, reason codes and approve/deny/revoke actions.
+- Added `verify_p2_012.bat`; Alembic head was `20260731_0053`.
+
 ## v0.15.0 — P2-011 Runtime Policy, Trust and Data Classification — 2026-07-30
 
 - Added deterministic fail-closed policy core with reason codes and SHA-256 fingerprints.

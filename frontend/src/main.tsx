@@ -5,11 +5,34 @@ import React, {
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
+import DocumentsWorkspace from "./DocumentsWorkspace";
 import PolicyApprovalCenter from "./PolicyApprovalCenter";
 import WorkspacePolicyPanel from "./WorkspacePolicyPanel";
 import "./styles.css";
 
-type View = "chat" | "council" | "gateway" | "sandbox" | "approvals" | "settings";
+type View =
+  | "chat"
+  | "council"
+  | "gateway"
+  | "sandbox"
+  | "documents"
+  | "approvals"
+  | "settings";
+
+const VIEWS: View[] = [
+  "chat",
+  "council",
+  "gateway",
+  "sandbox",
+  "documents",
+  "approvals",
+  "settings",
+];
+
+function initialView(): View {
+  const requested = new URLSearchParams(window.location.search).get("view");
+  return VIEWS.includes(requested as View) ? (requested as View) : "chat";
+}
 type Mode = "universal" | "crypto" | "code" | "documents";
 type CouncilExecutionMode =
   | "solo"
@@ -586,11 +609,11 @@ function apiError(data: unknown, fallback: string): string {
 }
 
 function App() {
-  const [view, setView] = useState<View>("chat");
+  const [view, setView] = useState<View>(initialView);
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "system",
-      text: "AI Studio Enterprise v0.16.0: fail-closed Runtime Policy, one-time approvals и decision evidence.",
+      text: "AI Studio Enterprise v0.17.0: governed Documents, exact citations и reviewer-gated AI.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -2145,7 +2168,7 @@ function App() {
         <div className="brand-mark">C</div>
         <div>
           <div className="logo">AI Studio</div>
-          <div className="version">Enterprise v0.16.0</div>
+          <div className="version">Enterprise v0.17.0</div>
         </div>
 
         <nav className="nav" aria-label="Разделы">
@@ -2181,7 +2204,10 @@ function App() {
             <span>05</span>
             Crypto AI
           </button>
-          <button disabled>
+          <button
+            className={view === "documents" ? "active" : ""}
+            onClick={() => setView("documents")}
+          >
             <span>06</span>
             Документы
           </button>
@@ -3292,6 +3318,18 @@ function App() {
             suggestedCouncilRunId={
               councilResult?.run_id ?? historyDetail?.run_id ?? ""
             }
+          />
+        ) : view === "documents" ? (
+          <DocumentsWorkspace
+            onOpenApprovals={() => {
+              const approvalUrl = new URL(window.location.href);
+              approvalUrl.searchParams.set("view", "approvals");
+              window.open(
+                approvalUrl.toString(),
+                "_blank",
+                "noopener,noreferrer",
+              );
+            }}
           />
         ) : view === "approvals" ? (
           <PolicyApprovalCenter />

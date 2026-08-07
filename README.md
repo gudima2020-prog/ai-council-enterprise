@@ -5,8 +5,8 @@
 после чего председатель формирует общий вывод, консенсус, разногласия,
 рекомендации и оценку уверенности.
 
-Текущая версия: **v0.16.0 / P2-012**.
-Alembic head: `20260731_0053`.
+Текущая версия: **v0.17.0 / P3-001**.
+Alembic head: `20260806_0057`.
 
 ## Что уже работает
 
@@ -21,6 +21,16 @@ Alembic head: `20260731_0053`.
 - approval-bound runtime artifact export по ZIP SHA-256 и manifest fingerprint;
 - append-only decision evidence и отдельный React-раздел «Approvals»;
 - Workspace data classification и provider trust tiers с отдельным разделом «Политика»;
+- Workspace-изолированный реестр PDF, DOCX, XLSX и TXT с safe intake,
+  content-addressed managed storage и удалением derived content;
+- deterministic extraction, isolated PDF OCR, exact preview и provenance;
+- явный выбор persisted units/chunks/OCR pages перед передачей модели;
+- preflight token budget, prompt-injection warnings и external-provider acknowledgement;
+- summary/question pipeline через AI Gateway с отдельными primary/reviewer
+  approvals, typed citations, retention и скрытием output до reviewer verdict;
+- React Documents Workspace для upload/delete, extraction/OCR, выбора sources,
+  governed analysis и истории evidence с request-generation guards и
+  `private, no-store` для content-bearing responses;
 - AI Council с режимами Solo / Council / Best-of-N / Review / Arbitration / Delegate;
 - Solo использует ровно одну модель; остальные коллективные режимы — 2–6 участников;
 - независимые Reviewer и Arbiter для проверяемого review/arbitration;
@@ -244,3 +254,21 @@ The **Approvals** UI shows the pending queue, exact scope, reason codes, TTL,
 approve/deny/revoke actions and append-only evidence. Gateway approvals cannot
 authorize another provider/model route, and artifact approvals cannot authorize
 a changed ZIP, manifest, runtime run or Workspace.
+
+## P3-001 Documents Workspace
+
+Documents are accepted only through the PDF/DOCX/XLSX/TXT safe-intake
+boundary, persisted in Workspace-scoped registry records and processed by
+deterministic extraction or the isolated no-network PDF OCR runtime. The UI
+never selects content implicitly: the user previews exact persisted sources and
+explicitly chooses every unit, chunk or OCR page sent to a model.
+
+Summary and question workflows run a model-capability/context preflight, show
+effective classification and Runtime Policy decisions, require explicit
+external-provider acknowledgement, and use different primary and reviewer
+models. Confidential routes can require separate exact-scope one-time Human
+Control approvals for both stages. Primary output remains unavailable until an
+independent reviewer approves citation coverage and policy compliance. The
+acknowledgement explicitly covers selected document context and the generated
+primary answer sent to an external reviewer; result citations expose exact
+document/run/source identity and full fragment hashes.

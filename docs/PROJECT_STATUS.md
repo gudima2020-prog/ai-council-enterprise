@@ -1,8 +1,8 @@
 # AI Studio Enterprise — Project Status
 
-Текущий этап: **P2-012 — Policy Approval Workflow & Decision Evidence**, реализован.
-Версия: **0.16.0 / P2-012**.
-Alembic head: **`20260731_0053`**.
+Текущий этап: **P3-001 — Documents Workspace**, реализован.
+Версия: **0.17.0 / P3-001**.
+Alembic head: **`20260806_0057`**.
 
 ## Завершённый фундамент P1
 
@@ -28,7 +28,34 @@ Alembic приводила к пропуску семи core-таблиц. Те�
 - unversioned-база классифицируется до `stamp`;
 - частичная схема отклоняется без изменения revision;
 - полный round trip миграций проверяется тестом;
-- актуальная metadata содержит 152 таблицы.
+- актуальная metadata содержит 165 таблиц.
+
+## P3-001 — Documents Workspace
+
+- safe intake принимает только проверенные PDF, DOCX, XLSX и TXT и не доверяет
+  extension/MIME без content validation;
+- Workspace-scoped registry использует content-addressed managed storage,
+  tombstones, integrity checks и metadata-only evidence;
+- deterministic extraction сохраняет exact units/chunks и provenance;
+- PDF OCR выполняется только в trusted immutable Docker runtime без сети,
+  сохраняет page text/hashes и поддерживает classification retention;
+- explicit AI context resolver проверяет Workspace/document/run/source binding,
+  persisted hashes, classification, retention и citation provenance;
+- summary/question pipeline выполняет model/context preflight, Runtime Policy,
+  external-provider acknowledgement и отдельные primary/reviewer approvals;
+- primary result скрыт до независимого reviewer approval; rejected/failed runs
+  не раскрывают output;
+- migration chain завершён revision `20260806_0057`;
+- React Documents UI поддерживает registry, upload/delete, extraction/OCR,
+  exact preview, explicit source selection, governed analysis и history;
+- independent-review closure блокирует stale preview, исключает HTTP caching
+  content-bearing responses, показывает exact citation identity, полностью
+  раскрывает external reviewer payload и сохраняет failed-run envelopes в UI;
+- pre-review Windows P3-001.6 gate: **216 targeted passed** и **647 full
+  passed, 1 skipped, 2 warnings**; corrected local P3-001.6a gate:
+  **216 targeted passed, 1 warning**, **648 full passed, 2 warnings** и
+  frontend production build **PASSED**. Corrected Windows gate остаётся
+  обязательным до commit/push.
 
 ## P2-012 — Policy Approval Workflow & Decision Evidence
 
@@ -184,8 +211,14 @@ Alembic приводила к пропуску семи core-таблиц. Те�
 - P2-007 targeted tests: реальные Git worktrees, fingerprint/TOCTOU, protected/blocked paths, approvals, safe apply, allowed roots, Git execution guards и Alembic CLI DB override;
 - P2-008 targeted tests: exact writable allowlist, Council handoff, malformed agent output, blocked secret paths, `.gitattributes` guard, exact-once replace, protected-file approval flow, запрет auto host-test/build, no-auto-apply и concurrent-edit TOCTOU;
 - P2-012 targeted regression: domain, persistence, REST API, Gateway coordinator/enforcement/API, runtime artifact coordinator/enforcement;
-- frontend production build и TypeScript compilation: **PASSED** в текущей Windows-среде;
-- полный backend regression: **454 passed, 1 skipped, 2 warnings**.
+- P3-001 targeted regression: intake, registry/storage/API, extraction,
+  OCR, context/citations, Document AI persistence/service/API, Gateway
+  classification/policy/approvals и migration manager;
+- frontend production build и TypeScript compilation: **PASSED** локально на
+  corrected P3-001.6a tree;
+- corrected local full backend regression: **648 passed, 2 warnings**;
+- Windows release gate до review closure проходил с **647 passed, 1 skipped,
+  2 warnings** и должен быть повторён после применения исправлений.
 
 ## P2-004 — Council Presets & Cost Control
 
@@ -235,5 +268,7 @@ Alembic приводила к пропуску семи core-таблиц. Те�
 
 ## Следующий этап
 
-**Phase 3 — Additional Workspaces**. Конкретный первый модуль выбирается
-отдельным архитектурным решением после выпуска P2-012.
+**P3-002 — Governed Developer Agent Profiles**: progressive-disclosure
+repository policies, tool execution hooks, independent Standards/Spec review,
+context checkpoints и signed/pinned skills registry. После него запланирован
+**P3-003 — Governed Local Utilities Workspace**.

@@ -1,63 +1,73 @@
 # Version
 
-Текущая версия: **0.16.0 / P2-012**
+Текущая версия: **0.17.0 / P3-001**
 Статус: **стабильная контрольная точка**
-Дата: **2026-08-04**
-Alembic head: **`20260731_0053`**
+Дата: **2026-08-07**
+Alembic head: **`20260806_0057`**
 
-## Основные возможности
+## Основные возможности релиза
 
-### P2-011 — Runtime Policy, Trust and Data Classification
+### Documents foundation
 
-- единый fail-closed policy engine с reason codes и SHA-256 fingerprint;
-- Workspace data classification и provider trust tiers;
-- enforcement каждого Gateway primary/failover route;
-- обязательная Docker isolation для исполнения недоверенного кода;
-- artifact export policy и runtime audit snapshots;
-- Workspace Policy UI.
+- safe intake PDF, DOCX, XLSX и TXT с bounded validation;
+- Workspace-scoped registry и content-addressed managed storage;
+- deterministic extraction с persisted units/chunks и provenance;
+- isolated no-network PDF OCR с trusted immutable Docker image;
+- classification-aware OCR/analysis retention и metadata-preserving purge.
 
-### P2-012 — Policy Approval Workflow & Decision Evidence
+### Governed Document AI
 
-- Workspace-scoped approval domain для точного Runtime Policy decision;
-- состояния `pending`, `approved`, `denied`, `expired`, `revoked`, `consumed`;
-- TTL 60 секунд — 24 часа, default 15 минут;
-- raw capability token возвращается только один раз при approve;
-- хранение только domain-separated SHA-256 token hash;
-- exact scope fingerprint для provider/model/request или runtime artifact;
-- migration `20260731_0053`;
-- Workspace-isolated repository/service и append-only SHA-256 evidence chain;
-- Human Control-bound REST API для request/list/get/approve/deny/revoke/evidence;
-- AI Gateway approval coordinator и atomic consume перед provider call;
-- независимая проверка каждого failover candidate;
-- streaming не выдаёт delta до успешного consume;
-- approval-aware Workspace Gateway API;
-- runtime artifact binding к run, ZIP SHA-256 и manifest fingerprint;
-- fresh policy evaluation и повторная descriptor check перед выдачей bytes;
-- React Approval Center с queue, filters, exact scope, TTL и decision evidence;
-- verification-скрипт `verify_p2_012.bat`.
+- explicit persisted source selection без implicit document context;
+- conservative token budget, exact manifest/citations и prompt-injection
+  warnings;
+- explicit primary и independent reviewer models с capability preflight;
+- effective source classification передаётся в общий AI Gateway;
+- external-provider acknowledgement до отправки content;
+- отдельные exact-scope one-time approvals для primary и reviewer;
+- primary output выдаётся только после успешного reviewer verdict;
+- persisted usage/cost/policy/approval evidence без raw prompts или tokens.
+
+### Documents UI
+
+- registry, upload/delete и Workspace isolation;
+- extraction/OCR status, bounded OCR controls и exact local preview;
+- provenance, SHA-256 и explicit source checkboxes;
+- summary/question preflight, Runtime Policy decisions и approvals flow;
+- completed/rejected/failed/purged states и explicit-content history;
+- stale-request guards и exact Workspace/document/run validation для preview;
+- `private, no-store` content responses и полная очистка one-time tokens;
+- exact persisted identity и полный fragment SHA-256 в result citations;
+- acknowledgement включает document context и primary answer, передаваемый
+  внешнему reviewer.
 
 ## Проверенная конфигурация
 
-- Alembic heads: **`20260731_0053 (head)`**;
-- Alembic current: **`20260731_0053 (head)`**;
-- backend tests: **454 passed, 1 skipped, 2 warnings**;
-- frontend TypeScript/Vite production build: **PASSED**;
-- targeted Policy Approval regression: **PASSED**;
-- local/remote feature branch synchronization: **PASSED**.
+- Alembic heads/current target: **`20260806_0057 (head)`**;
+- P3-001.5b Documents/Gateway targeted suite: **216 passed, 1 warning**;
+- backend regression на P3-001.5b checkpoint: **647 passed, 1 skipped,
+  2 warnings**;
+- local P3-001.6a review-closure targeted regression: **216 passed,
+  1 warning**;
+- local P3-001.6a full backend regression: **648 passed, 2 warnings**;
+- frontend TypeScript/Vite production build с review-closure UI: **PASSED**;
+- final Windows release gate после применения independent-review closure:
+  **`verify_p3_001_6.bat`**.
 
-Пропущенный тест связан с недоступностью символических ссылок на текущей
-Windows-конфигурации и не является отказом функциональности.
+Пропущенный тест связан с недоступностью symbolic links на целевой
+Windows-конфигурации и не является отказом Documents functionality.
 
 Известные неблокирующие предупреждения:
 
-- Starlette TestClient использует deprecated integration с `httpx`;
-- example plugin создаёт duplicate OpenAPI Operation ID.
+- Starlette TestClient использует deprecated `httpx` integration;
+- example plugin создаёт duplicate OpenAPI Operation ID;
+- Docker CLI без запущенного daemon пропускает только OCR image preflight;
+  сам OCR runtime требует отдельно подготовленный trusted image.
 
 ## Release procedure
 
-1. выполнить `verify_p2_012.bat` на release closure commit;
-2. отправить `feature/p2-012`;
+1. выполнить `verify_p3_001_6.bat` на release closure commit;
+2. отправить `feature/p3-001`;
 3. объединить ветку с `main`;
-4. повторно выполнить `verify_p2_012.bat` на merge commit;
-5. создать annotated tag `v0.16.0-p2-012`;
+4. повторно выполнить `verify_p3_001_6.bat` на merge commit;
+5. создать annotated tag `v0.17.0-p3-001`;
 6. отправить `main` и tag в `origin`.

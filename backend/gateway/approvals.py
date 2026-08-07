@@ -52,8 +52,9 @@ def _canonical(value: Any) -> str:
 
 def gateway_request_fingerprint(request: GatewayRequest) -> str:
     payload = {
-        "schema_version": "p2-012.3a",
+        "schema_version": "p3-001.5b",
         "workspace_id": request.workspace_id,
+        "data_classification": request.data_classification,
         "provider": request.provider,
         "model": request.model,
         "temperature": request.temperature,
