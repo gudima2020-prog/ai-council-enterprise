@@ -1,8 +1,22 @@
 # AI Studio Enterprise — Project Status
 
-Текущий этап: **P3-001 — Documents Workspace**, реализован.
+Текущий этап: **P3-002 — Governed Developer Agent Profiles**, в разработке.
 Версия: **0.17.0 / P3-001**.
 Alembic head: **`20260806_0057`**.
+
+## P3-002.1a — Agent policy and checkpoint core
+
+- immutable profile manifest содержит exact tools и обязательные capability
+  bindings, actions/checks, approval conditions, external domains,
+  classifications, model selectors и audit version;
+- deterministic evaluator выдаёт `allow`, `require_approval` или `deny` с
+  reason codes и fingerprint, но не подменяет Runtime/Workspace Policy;
+- шесть встроенных профилей покрывают safe development, read-only research,
+  documents, repository review, release и production operation;
+- context checkpoint хранит только bounded continuation metadata, проверяет
+  repository-relative paths, full Git SHA, schema и envelope fingerprint;
+- persistence, REST API, Before/After Tool hooks и Event Bus evidence остаются
+  следующими отдельными срезами; Alembic head не изменён.
 
 ## Завершённый фундамент P1
 

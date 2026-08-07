@@ -6,6 +6,15 @@ runtime dependencies, embedded services, or permission authorities.
 
 ## P3-002 — Governed Developer Agent Profiles
 
+Current delivery status:
+
+- repository policy and progressive-disclosure documents shipped with
+  v0.17.0;
+- P3-002.1a immutable policy-profile evaluation and content-free checkpoint
+  contracts are implemented without persistence or execution hooks;
+- remaining registry, hook, reviewer, persisted-checkpoint and signed-skill
+  work stays fail-closed and separately reviewable.
+
 Proposed delivery slices:
 
 1. Shared repository policy and progressive-disclosure agent documentation.
@@ -18,11 +27,14 @@ Proposed delivery slices:
 5. Persisted context checkpoints and compact-preservation contract.
 6. Signed, pinned, license-aware skill/plugin registry with manual update review.
 
-An agent profile manifest must define allowed tools, denied actions, mandatory
-checks, approval conditions, external domains, content classifications, primary
-model, reviewer model, and audit version. Hooks cannot grant permission; they
-can only enforce or further restrict a decision from the canonical policy
-services.
+An agent profile manifest must define allowed tools and exact required
+capabilities for each tool, denied actions, mandatory checks, approval
+conditions, external domains, content classifications, primary model, reviewer
+model, and audit version. Hooks cannot grant permission; they can only enforce
+or further restrict a decision from the canonical policy services.
+
+The implemented P3-002.1a contract and its deferred boundaries are specified in
+`docs/P3_002_GOVERNED_DEVELOPER_AGENT_PROFILES.md`.
 
 Example skill manifest:
 

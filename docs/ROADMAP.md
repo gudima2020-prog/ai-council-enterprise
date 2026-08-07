@@ -1,7 +1,7 @@
 # AI Studio Enterprise — Roadmap
 
 Версия плана: **0.17.0**
-Дата обновления: **2026-08-06**
+Дата обновления: **2026-08-07**
 
 ## Phase 1 — Enterprise Core
 
@@ -169,10 +169,13 @@
 
 ### P3-002 — Governed Developer Agent Profiles
 
-Статус: **запланировано после P3-001**.
+Статус: **в разработке; P3-002.1a core реализован**.
 
 - progressive-disclosure repository policy и context checkpoints;
 - Agent Policy Profiles поверх Workspace Policy и Human Control;
+- P3-002.1a: immutable manifests, exact tool-capability bindings, шесть audited
+  built-in profiles, deterministic allow/require-approval/deny evaluation и
+  content-free checkpoint с integrity fingerprint;
 - Before/After Tool Execution enforcement hooks;
 - независимые Standards/Spec reviewer и diff-simplification gates;
 - signed, pinned и license-aware registry skills/plugins без auto-update.

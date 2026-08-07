@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — P3-002 Governed Developer Agent Profiles
+
+- Added immutable, bounded and SHA-256-fingerprinted Agent Policy Profile
+  contracts with deterministic `allow`, `require_approval` and `deny`
+  decisions that cannot replace canonical platform policy.
+- Bound every allowed tool to immutable required capabilities so omitted
+  request metadata cannot bypass filesystem, network or approval controls.
+- Added six conservative built-in profiles for development, research,
+  document analysis, repository review, release and production operation.
+- Added a bounded content-free Context Checkpoint contract with repository-path,
+  Git SHA, schema and envelope-integrity validation.
+- Added P3-002.1a contract tests and `verify_p3_002_1a.bat`; persistence, API and
+  tool-execution hooks remain deferred.
+
 ## v0.17.0 — P3-001 Documents Workspace — 2026-08-07
 
 - Added safe PDF/DOCX/XLSX/TXT intake, Workspace registry and content-addressed managed storage.

@@ -21,6 +21,12 @@ Alembic head: `20260806_0057`.
 - approval-bound runtime artifact export по ZIP SHA-256 и manifest fingerprint;
 - append-only decision evidence и отдельный React-раздел «Approvals»;
 - Workspace data classification и provider trust tiers с отдельным разделом «Политика»;
+- immutable Agent Policy Profile core с шестью audited defaults,
+  exact tool-capability bindings, детерминированными restriction decisions и
+  обязательным продолжением через Runtime Policy, Workspace Policy и Human
+  Control;
+- content-free Context Checkpoint core с bounded fields, exact repository paths,
+  full Git SHA и integrity fingerprint для безопасной передачи сессии;
 - Workspace-изолированный реестр PDF, DOCX, XLSX и TXT с safe intake,
   content-addressed managed storage и удалением derived content;
 - deterministic extraction, isolated PDF OCR, exact preview и provenance;
