@@ -66,6 +66,7 @@ router = APIRouter(
 _UPLOAD_READ_CHUNK_BYTES = 64 * 1024
 _MAX_UPLOAD_BYTES = DocumentIntakePolicy().max_file_bytes
 _MAX_METADATA_JSON_CHARS = 32_768
+_PRIVATE_NO_STORE = "private, no-store"
 
 
 class DocumentOCRRunRequest(BaseModel):
@@ -521,6 +522,7 @@ def list_document_extraction_units(
     workspace_id: str,
     document_id: str,
     run_id: str,
+    response: Response,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     service: DocumentExtractionService = Depends(
@@ -546,6 +548,7 @@ def list_document_extraction_units(
         )
     except Exception as exc:
         raise _translate_error(exc) from exc
+    response.headers["Cache-Control"] = _PRIVATE_NO_STORE
     return {
         "workspace_id": workspace_id,
         "document_id": document_id,
@@ -566,6 +569,7 @@ def list_document_extraction_chunks(
     workspace_id: str,
     document_id: str,
     run_id: str,
+    response: Response,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     service: DocumentExtractionService = Depends(
@@ -591,6 +595,7 @@ def list_document_extraction_chunks(
         )
     except Exception as exc:
         raise _translate_error(exc) from exc
+    response.headers["Cache-Control"] = _PRIVATE_NO_STORE
     return {
         "workspace_id": workspace_id,
         "document_id": document_id,
@@ -752,6 +757,7 @@ def list_document_ocr_pages(
     workspace_id: str,
     document_id: str,
     run_id: str,
+    response: Response,
     include_text: bool = Query(default=False),
     limit: int = Query(default=100, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -778,6 +784,7 @@ def list_document_ocr_pages(
         )
     except Exception as exc:
         raise _translate_error(exc) from exc
+    response.headers["Cache-Control"] = _PRIVATE_NO_STORE
     return {
         "workspace_id": workspace_id,
         "document_id": document_id,

@@ -42,6 +42,8 @@ router = APIRouter(
     tags=["document-ai"],
 )
 
+_PRIVATE_NO_STORE = "private, no-store"
+
 
 class DocumentAISourceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -232,6 +234,7 @@ def _translate_error(exc: Exception) -> HTTPException:
 def preflight_document_ai(
     workspace_id: str,
     request: DocumentAIPreflightRequest,
+    response: Response,
     service: DocumentAIAnalysisService = Depends(
         get_document_ai_analysis_service
     ),
@@ -244,6 +247,7 @@ def preflight_document_ai(
         result = service.preflight(spec=_spec(workspace_id, request))
     except Exception as exc:
         raise _translate_error(exc) from exc
+    response.headers["Cache-Control"] = _PRIVATE_NO_STORE
     return result.to_public_dict()
 
 
@@ -287,12 +291,14 @@ async def execute_document_ai(
         response.status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
     elif result.created:
         response.status_code = status.HTTP_201_CREATED
+    response.headers["Cache-Control"] = _PRIVATE_NO_STORE
     return result.to_public_dict(include_content=True)
 
 
 @router.get("/runs")
 def list_document_ai_runs(
     workspace_id: str,
+    response: Response,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     service: DocumentAIAnalysisService = Depends(
@@ -311,6 +317,7 @@ def list_document_ai_runs(
         )
     except Exception as exc:
         raise _translate_error(exc) from exc
+    response.headers["Cache-Control"] = _PRIVATE_NO_STORE
     return {
         "workspace_id": workspace_id,
         "items": [item.to_public_dict() for item in items],
@@ -323,6 +330,7 @@ def list_document_ai_runs(
 def get_document_ai_run(
     workspace_id: str,
     analysis_run_id: str,
+    response: Response,
     include_content: bool = Query(default=False),
     service: DocumentAIAnalysisService = Depends(
         get_document_ai_analysis_service
@@ -339,6 +347,7 @@ def get_document_ai_run(
         )
     except Exception as exc:
         raise _translate_error(exc) from exc
+    response.headers["Cache-Control"] = _PRIVATE_NO_STORE
     return record.to_public_dict(include_content=include_content)
 
 

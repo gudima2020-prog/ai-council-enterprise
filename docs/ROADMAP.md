@@ -1,7 +1,7 @@
 # AI Studio Enterprise — Roadmap
 
-Версия плана: **0.16.0**
-Дата обновления: **2026-08-05**
+Версия плана: **0.17.0**
+Дата обновления: **2026-08-06**
 
 ## Phase 1 — Enterprise Core
 
@@ -12,7 +12,7 @@
 - Autonomous Missions;
 - Human Control Center;
 - Secret Management и внешние Secret Providers;
-- Alembic head `20260731_0053`.
+- Alembic head `20260806_0057`.
 
 ## Phase 2 — Product Modules
 
@@ -147,7 +147,7 @@
 
 ### P3-001 — Documents Workspace
 
-Статус: **разработка начата**.
+Статус: **реализован в v0.17.0**.
 
 - P3-001.1: safe intake core для PDF, DOCX, XLSX и TXT;
 - P3-001.2a: Workspace registry и content-addressed managed storage;
@@ -160,7 +160,12 @@
   prompt-injection warnings и exact citation core;
 - P3-001.5b: governed summary/question Gateway pipeline, persisted evidence,
   exact citations, independent reviewer, one-time approvals и retention;
-- далее: Documents UI and release.
+- P3-001.6: Workspace registry UI, upload/delete, extraction/OCR status,
+  exact preview/provenance, explicit source selection, governed analysis
+  workflow, history и release verification;
+- P3-001.6a: independent-review closure — stale preview guards, no-store
+  content boundary, exact result citations, complete external-reviewer
+  disclosure, token cleanup и persisted failed-run UI handling.
 
 ### P3-002 — Governed Developer Agent Profiles
 

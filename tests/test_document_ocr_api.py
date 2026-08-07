@@ -214,6 +214,7 @@ def test_ocr_run_list_get_and_bounded_pages(
 
     metadata_pages = client.get(f"{base}/{run_id}/pages")
     assert metadata_pages.status_code == 200
+    assert metadata_pages.headers["cache-control"] == "private, no-store"
     assert len(metadata_pages.json()["items"]) == 2
     assert "text" not in metadata_pages.json()["items"][0]
 
@@ -222,6 +223,7 @@ def test_ocr_run_list_get_and_bounded_pages(
         params={"include_text": "true", "limit": 1},
     )
     assert text_pages.status_code == 200
+    assert text_pages.headers["cache-control"] == "private, no-store"
     assert len(text_pages.json()["items"]) == 1
     assert text_pages.json()["items"][0]["text"] == "Page 1"
 

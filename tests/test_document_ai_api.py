@@ -199,6 +199,7 @@ def test_preflight_execute_list_and_explicit_content(api_context) -> None:
 
     preflight = client.post(f"{base}/preflight", json=payload)
     assert preflight.status_code == 200, preflight.text
+    assert preflight.headers["cache-control"] == "private, no-store"
     assert preflight.json()["external_provider_warning_required"] is True
     assert gateway.calls == []
 
@@ -211,6 +212,7 @@ def test_preflight_execute_list_and_explicit_content(api_context) -> None:
         },
     )
     assert execute.status_code == 201, execute.text
+    assert execute.headers["cache-control"] == "private, no-store"
     body = execute.json()
     assert body["analysis"]["status"] == "completed"
     assert body["analysis"]["output_text"] == (
@@ -220,16 +222,19 @@ def test_preflight_execute_list_and_explicit_content(api_context) -> None:
 
     listed = client.get(f"{base}/runs")
     assert listed.status_code == 200
+    assert listed.headers["cache-control"] == "private, no-store"
     assert listed.json()["items"][0]["id"] == run_id
     assert "output_text" not in listed.json()["items"][0]
 
     metadata = client.get(f"{base}/runs/{run_id}")
     assert metadata.status_code == 200
+    assert metadata.headers["cache-control"] == "private, no-store"
     assert "output_text" not in metadata.json()
     content = client.get(
         f"{base}/runs/{run_id}",
         params={"include_content": "true"},
     )
+    assert content.headers["cache-control"] == "private, no-store"
     assert content.json()["output_text"] == "The deadline is 30 June 2027."
 
 

@@ -41,7 +41,7 @@ class AppSettings:
 class ConfigurationManager:
     DEFAULTS: dict[str, Any] = {
         "app_name": "AI Studio Enterprise",
-        "app_version": "0.14.0",
+        "app_version": "0.17.0",
         "environment": "development",
         "debug": True,
         "host": "127.0.0.1",

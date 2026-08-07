@@ -246,6 +246,7 @@ def test_extract_list_get_units_and_chunks(
         f"{base}/{run_id}/units"
     )
     assert units.status_code == 200
+    assert units.headers["cache-control"] == "private, no-store"
     assert units.json()["items"][0]["text"] == (
         "alpha beta gamma"
     )
@@ -254,6 +255,7 @@ def test_extract_list_get_units_and_chunks(
         f"{base}/{run_id}/chunks"
     )
     assert chunks.status_code == 200
+    assert chunks.headers["cache-control"] == "private, no-store"
     assert chunks.json()["items"]
 
 

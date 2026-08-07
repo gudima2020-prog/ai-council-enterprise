@@ -2,10 +2,9 @@
 
 ## Статус
 
-P3-001 находится в активной разработке. Текущий реализованный подэтап —
-**P3-001.5a Local AI Context and Citation Safety Core**. Стабильной контрольной
-точкой проекта остаётся `0.16.0 / P2-012` до завершения всего Documents
-Workspace release.
+P3-001 завершён как стабильная контрольная точка
+**AI Studio Enterprise v0.17.0 / P3-001**. Alembic head —
+`20260806_0057`; финальный подэтап — **P3-001.6 Documents UI and Release**.
 
 Documents Workspace должен поддерживать PDF, DOCX, XLSX и TXT, извлечение
 текста и передачу только явно выбранного контента в AI Gateway. OCR, таблицы,
@@ -314,20 +313,94 @@ P3-001.5a не читает БД, не сохраняет manifest, не соз�
   citations и decision evidence; удаление любого исходного документа удаляет
   весь зависимый multi-document analysis run.
 
-Локальная проверка до Windows release gate:
+Проверка P3-001.5b от 2026-08-06:
 
 - P3-001.5b core/resolver/persistence/service/API/Gateway contracts: PASSED;
 - Documents/Gateway targeted regression: **216 passed, 1 known warning**;
-- migration round-trip to head `20260806_0057`: PASSED.
-
-Полный backend regression и frontend build должны быть подтверждены на
-целевом Windows-host скриптом `verify_p3_001_5b.bat` до staging/commit.
+- migration round-trip to head `20260806_0057`: PASSED;
+- full backend regression: **647 passed, 1 skipped, 2 known warnings**;
+- frontend TypeScript/Vite production build: **PASSED**;
+- OCR Docker preflight: Docker CLI найден, daemon не запущен; это
+  неблокирующее состояние, runtime image проверяется отдельно при доступном
+  daemon.
 
 ### P3-001.6 — Documents UI and Release
 
-- Workspace document registry;
-- upload/delete;
-- extraction/OCR status;
-- preview and provenance;
-- summary and question workflows;
-- release verification.
+Реализован React Documents Workspace поверх неизменяемых P3-001.1–5b
+контрактов:
+
+- активная навигация Documents и Workspace-scoped registry до 500 records;
+- multipart upload и подтверждаемое удаление документа вместе со всем derived
+  content;
+- статусы deterministic extraction и isolated PDF OCR, bounded page selection
+  и classification-aware retention;
+- exact local preview persisted units/chunks/OCR pages с provenance и SHA-256;
+- только явный checkbox-выбор sources, максимум 128, без implicit selection;
+- summary/question form с разными JSON-capable primary/reviewer models;
+- актуальный preflight показывает effective classification, token budget,
+  citations, prompt-injection warnings и обе Runtime Policy decisions;
+- external-provider acknowledgement обязательно до передачи выбранного
+  контекста;
+- primary и reviewer approval проходят как два независимых exact-scope
+  one-time Human Control gate; Approval Center открывается в отдельной вкладке,
+  поэтому preflight/idempotency state не теряется;
+- one-time tokens не сохраняются и очищаются после HTTP response;
+- primary output скрыт до `completed` reviewer verdict; `failed`, `rejected`
+  и `purged` показывают только безопасный статус/evidence;
+- history читает content только через явный `include_content=true` запрос;
+- release version `0.17.0`, migration head `20260806_0057` и Windows gate
+  `verify_p3_001_6.bat`.
+
+Финальная проверка требует:
+
+- P3-001 Documents/Gateway targeted regression;
+- полный backend regression;
+- frontend TypeScript/Vite production build;
+- OCR Docker runtime preflight без автоматической загрузки образа;
+- Standards review, Spec review и Simplification review staged diff.
+
+Локальный pre-release gate от 2026-08-06 на текущем P3-001.6 tree:
+
+- Documents/Gateway targeted regression: **216 passed, 1 warning**;
+- full backend regression: **648 passed, 2 warnings**;
+- Alembic head: **`20260806_0057 (head)`**;
+- frontend TypeScript/Vite production build: **PASSED**.
+
+На Linux symlink regression выполняется, поэтому локальный full count на один
+тест выше Windows checkpoint. Показанный Windows-host PASS относится к tree до
+обязательного independent review и не переносится на исправленный tree.
+
+### P3-001.6a — Independent Review Closure
+
+По итогам отдельного read-only Standards/Spec/Simplification review устранены:
+
+- stale extraction/OCR preview: request-generation guard, блокировка
+  Workspace/document/run selectors и fail-closed проверка identity каждого
+  ответа и source record;
+- browser content persistence: каждый frontend fetch использует
+  `cache: no-store`, а extraction/OCR/Document AI content endpoints возвращают
+  `Cache-Control: private, no-store`;
+- stale retained output: content-bearing history detail очищается при refresh
+  и удалении документа и загружается повторно только явным
+  `include_content=true`;
+- неполный external warning: UI показывает per-stage warning и отдельно
+  подтверждает передачу выбранного document context, citation IDs и generated
+  primary answer внешнему reviewer;
+- неоднозначные result citations: UI показывает exact document ID, run ID,
+  source kind/ID, human-readable location и полный fragment SHA-256;
+- остаток one-time token: каждый фактически отправленный token очищается сразу
+  после получения HTTP response до разбора status/body;
+- потеря failed extraction/OCR envelope: UI сохраняет persisted run ID/status,
+  обновляет registry и показывает безопасные error code/message также для
+  намеренных не-2xx responses.
+
+Предыдущий Windows gate необходимо повторить на P3-001.6a tree. До нового
+успешного `verify_p3_001_6.bat` коммит и push не разрешены.
+
+Локальная проверка исправленного tree от 2026-08-07:
+
+- extraction/OCR/Document AI API regression: **20 passed, 1 warning**;
+- Documents/Gateway targeted regression: **216 passed, 1 warning**;
+- full backend regression: **648 passed, 2 warnings**;
+- frontend TypeScript/Vite production build: **PASSED**;
+- `git diff --check`: **PASSED**.
