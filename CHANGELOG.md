@@ -11,8 +11,11 @@
   document analysis, repository review, release and production operation.
 - Added a bounded content-free Context Checkpoint contract with repository-path,
   Git SHA, schema and envelope-integrity validation.
-- Added P3-002.1a contract tests and `verify_p3_002_1a.bat`; persistence, API and
-  tool-execution hooks remain deferred.
+- Added P3-002.1a contract tests and `verify_p3_002_1a.bat`.
+- Added P3-002.1b Workspace-scoped immutable custom profile versions, exact
+  fingerprint-bound active selection, trusted tool-capability validation and
+  Human Control-bound REST API with migration `20260807_0058`.
+- Before/After Tool Execution enforcement hooks remain deferred.
 
 ## v0.17.0 — P3-001 Documents Workspace — 2026-08-07
 

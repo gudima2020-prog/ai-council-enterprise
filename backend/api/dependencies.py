@@ -5,6 +5,7 @@ from collections.abc import Generator
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from backend.agent_governance.service import AgentProfileService
 from backend.code_sandbox.agent import CodeAgentService
 from backend.code_sandbox.artifact_approvals import (
     RuntimeArtifactApprovalCoordinator,
@@ -48,6 +49,12 @@ def get_container(request: Request) -> AppContainer:
 def get_db_session() -> Generator[Session, None, None]:
     with session_scope() as session:
         yield session
+
+
+def get_agent_profile_service(
+    session: Session = Depends(get_db_session),
+) -> AgentProfileService:
+    return AgentProfileService(session)
 
 
 def get_policy_approval_service(

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from types import MappingProxyType
+from typing import Mapping
+
 from backend.agent_governance.core import (
     AgentCapability,
     AgentFilesystemAccess,
@@ -70,6 +73,10 @@ _TOOL_CAPABILITIES: dict[str, tuple[AgentCapability, ...]] = {
     "tests.read": (AgentCapability.FILESYSTEM_READ,),
     "tests.run": (AgentCapability.CODE_EXECUTION,),
 }
+
+
+def agent_tool_capability_catalog() -> Mapping[str, tuple[AgentCapability, ...]]:
+    return MappingProxyType(dict(_TOOL_CAPABILITIES))
 
 
 def _profile(

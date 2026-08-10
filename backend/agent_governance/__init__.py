@@ -19,7 +19,25 @@ from backend.agent_governance.core import (
 )
 from backend.agent_governance.profiles import (
     BUILT_IN_AGENT_PROFILE_IDS,
+    agent_tool_capability_catalog,
     built_in_agent_profiles,
+)
+from backend.agent_governance.repository import (
+    AgentProfileRepository,
+    AgentProfileRepositoryError,
+    AgentProfileVersionConflictError,
+)
+from backend.agent_governance.service import (
+    AgentProfileFingerprintMismatchError,
+    AgentProfileImmutableBuiltInError,
+    AgentProfileIntegrityError,
+    AgentProfileSelectionNotFoundError,
+    AgentProfileSelectionRecord,
+    AgentProfileService,
+    AgentProfileServiceError,
+    AgentProfileToolBindingError,
+    AgentProfileVersionRecord,
+    AgentProfileWorkspaceError,
 )
 
 
@@ -37,8 +55,22 @@ __all__ = [
     "AgentPolicyDecision",
     "AgentPolicyEvaluator",
     "AgentPolicyProfile",
+    "AgentProfileFingerprintMismatchError",
+    "AgentProfileImmutableBuiltInError",
+    "AgentProfileIntegrityError",
     "AgentProfileNotFoundError",
     "AgentProfileRegistry",
+    "AgentProfileRepository",
+    "AgentProfileRepositoryError",
+    "AgentProfileSelectionNotFoundError",
+    "AgentProfileSelectionRecord",
+    "AgentProfileService",
+    "AgentProfileServiceError",
+    "AgentProfileToolBindingError",
+    "AgentProfileVersionConflictError",
+    "AgentProfileVersionRecord",
+    "AgentProfileWorkspaceError",
     "AgentToolRequest",
+    "agent_tool_capability_catalog",
     "built_in_agent_profiles",
 ]

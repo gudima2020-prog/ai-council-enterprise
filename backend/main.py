@@ -16,6 +16,7 @@ from backend.control_center.security import HumanControlAuthMiddleware
 from backend.middleware.workspace_context import WorkspaceContextMiddleware
 from backend.routers import (
     agent_collaboration,
+    agent_profiles,
     autonomous_missions,
     agents,
     chat,
@@ -778,6 +779,7 @@ app.include_router(human_control_retention.router, prefix="/api")
 app.include_router(human_control_routing.router, prefix="/api")
 app.include_router(agents.router, prefix="/api")
 app.include_router(agent_collaboration.router, prefix="/api")
+app.include_router(agent_profiles.router, prefix="/api")
 app.include_router(autonomous_missions.router, prefix="/api")
 app.include_router(mission_forecasting.router, prefix="/api")
 app.include_router(mission_governance.router, prefix="/api")

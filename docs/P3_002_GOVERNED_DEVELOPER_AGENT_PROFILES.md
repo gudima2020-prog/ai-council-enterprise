@@ -107,9 +107,40 @@ retention, redaction evidence and Workspace API are intentionally deferred.
 The persistence slice must add secret/PII redaction or scanning before accepting
 these free-text summary fields.
 
+
+
+## P3-002.1b — Workspace profile persistence, selection and API
+
+Status: **implemented and verified**.
+
+This slice adds:
+
+- Alembic revision `20260807_0058` with Workspace-scoped immutable custom
+  profile versions and one active profile selection per Workspace;
+- exact `(workspace_id, profile_id, version)` immutability with idempotent
+  replay only when the stored manifest and fingerprint are identical;
+- fail-closed reconstruction of persisted manifests and SHA-256 integrity
+  verification on every read and active-selection resolution;
+- immutable code-owned built-in profiles that are selectable but cannot be
+  created or replaced as custom Workspace configuration;
+- a canonical trusted tool-capability catalog; custom profiles may select
+  trusted tools but cannot under-declare their security capabilities;
+- exact active binding to `profile_id + version + profile_fingerprint`;
+- Human Control-bound REST routes for built-in discovery, custom
+  create/list/get, active get and active selection;
+- `human_control.view` for reads and `human_control.manage_policies` for
+  mutations, with authenticated actor binding required for every mutation;
+- cross-Workspace path binding and repository isolation.
+
+The profile layer remains restrictive only. Selecting or storing a profile
+does not grant provider, filesystem, network, repository, Runtime Policy or
+Workspace Policy permission. Before/After Tool Execution composition remains
+a later P3-002 slice.
+
+Verification entry point: `verify_p3_002_1b.bat`.
+
 ### Deferred work
 
-- Workspace-scoped profile registry, persistence, selection and API;
 - Before/After Tool Execution enforcement and canonical policy composition;
 - exact-scope Human Control approval coordination and Event Bus evidence;
 - independent Standards/Spec reviewer and simplification execution gates;
