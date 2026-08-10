@@ -17,6 +17,14 @@ from backend.agent_governance.core import (
     AgentProfileRegistry,
     AgentToolRequest,
 )
+from backend.agent_governance.enforcement import (
+    AGENT_BEFORE_TOOL_ENFORCEMENT_SCHEMA_VERSION,
+    AgentBeforeToolExecutionDecision,
+    AgentEnforcementAction,
+    AgentEnforcementLayer,
+    AgentEnforcementLayerDecision,
+    BeforeToolExecutionEnforcer,
+)
 from backend.agent_governance.profiles import (
     BUILT_IN_AGENT_PROFILE_IDS,
     agent_tool_capability_catalog,
@@ -42,13 +50,19 @@ from backend.agent_governance.service import (
 
 
 __all__ = [
+    "AGENT_BEFORE_TOOL_ENFORCEMENT_SCHEMA_VERSION",
     "AGENT_CONTEXT_CHECKPOINT_SCHEMA_VERSION",
     "AGENT_POLICY_DECISION_SCHEMA_VERSION",
     "AGENT_POLICY_PROFILE_SCHEMA_VERSION",
     "BUILT_IN_AGENT_PROFILE_IDS",
+    "BeforeToolExecutionEnforcer",
+    "AgentBeforeToolExecutionDecision",
     "AgentCapability",
     "AgentContextCheckpoint",
     "AgentContextCheckpointIntegrityError",
+    "AgentEnforcementAction",
+    "AgentEnforcementLayer",
+    "AgentEnforcementLayerDecision",
     "AgentFilesystemAccess",
     "AgentNetworkAccess",
     "AgentPolicyAction",

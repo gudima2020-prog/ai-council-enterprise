@@ -15,7 +15,10 @@
 - Added P3-002.1b Workspace-scoped immutable custom profile versions, exact
   fingerprint-bound active selection, trusted tool-capability validation and
   Human Control-bound REST API with migration `20260807_0058`.
-- Before/After Tool Execution enforcement hooks remain deferred.
+- Added P3-002.2a pure Before Tool Execution composition with fail-closed
+  required-layer checks, exact profile fingerprint binding, canonical
+  Runtime Policy isolation preservation and trusted Human Control evidence.
+- Runtime wiring and After Tool Execution enforcement remain deferred.
 
 ## v0.17.0 — P3-001 Documents Workspace — 2026-08-07
 

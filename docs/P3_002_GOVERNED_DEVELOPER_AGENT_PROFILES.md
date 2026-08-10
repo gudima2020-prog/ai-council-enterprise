@@ -139,9 +139,59 @@ a later P3-002 slice.
 
 Verification entry point: `verify_p3_002_1b.bat`.
 
+## P3-002.2a — Before Tool Execution enforcement core
+
+Status: **implemented and under verification**.
+
+This slice adds a pure, deterministic and fail-closed composition boundary
+before real tool execution. It does not yet wire the decision into
+`ToolExecutionRuntime`, consume approval tokens, execute tools, call providers,
+mutate repositories, create persistence rows or publish enforcement events.
+
+`BeforeToolExecutionEnforcer` evaluates the selected Agent Policy Profile and
+joins it with independently produced evidence from the Tool Registry,
+Workspace Policy and canonical Runtime Policy. Human Control evidence is
+accepted only as already validated policy evidence; exact-scope approval
+lookup, token validation/consumption and evidence emission remain a runtime
+adapter responsibility for the next slice.
+
+The composition is monotonic:
+
+1. structural integrity failures, profile denial or any canonical denial
+   produce `deny`;
+2. unresolved canonical isolation remains `require_isolation`;
+3. unresolved profile/canonical approval remains `require_approval`;
+4. `allow` is possible only when all required canonical layers are present,
+   Workspace-bound and non-denying, the exact selected profile fingerprint
+   matches, and every requested approval has trusted Human Control evidence.
+
+Human Control can satisfy an approval requirement but can never override a
+profile/canonical denial, replace a missing canonical layer or remove Runtime
+Policy isolation.
+
+Required canonical evidence layers are Tool Registry, Workspace Policy and
+Runtime Policy. Missing or duplicate layers fail closed. Layer evidence carries
+the Workspace ID, action, reason codes, upstream policy version and upstream
+fingerprint. The canonical Runtime Policy adapter preserves all four Runtime
+Policy outcomes: `allow`, `require_approval`, `require_isolation` and `deny`.
+
+The enforcement decision carries the Agent Policy decision, layer evidence,
+stable reason codes, unresolved approval/isolation state, mandatory checks and
+a deterministic SHA-256 fingerprint. It is metadata-only: tool input, prompts,
+model arguments, secrets and credentials are deliberately excluded.
+
+`AgentToolRequest` must be constructed from trusted Tool Registry/adapter
+metadata. Model-generated arguments are never authority for tool identity,
+action, capabilities, domain, Workspace or canonical policy evidence.
+
+Verification entry point: `verify_p3_002_2a.bat`.
+
+
 ### Deferred work
 
-- Before/After Tool Execution enforcement and canonical policy composition;
+- ToolExecutionRuntime wiring with trusted Tool Registry/Workspace Policy adapters,
+  exact-scope Human Control approval validation/consumption and Event Bus evidence;
+- After Tool Execution enforcement and evidence;
 - exact-scope Human Control approval coordination and Event Bus evidence;
 - independent Standards/Spec reviewer and simplification execution gates;
 - persisted checkpoint lifecycle and compact restore;

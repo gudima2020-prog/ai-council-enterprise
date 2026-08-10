@@ -169,7 +169,7 @@
 
 ### P3-002 — Governed Developer Agent Profiles
 
-Статус: **в разработке; P3-002.1a и P3-002.1b реализованы**.
+Статус: **в разработке; P3-002.1a, P3-002.1b и P3-002.2a реализованы**.
 
 - progressive-disclosure repository policy и context checkpoints;
 - Agent Policy Profiles поверх Workspace Policy и Human Control;
@@ -179,7 +179,10 @@
 - P3-002.1b: Workspace-scoped immutable custom profile versions, trusted
   tool-capability catalog, exact fingerprint-bound active selection, Alembic
   `20260807_0058` и Human Control-bound REST API;
-- Before/After Tool Execution enforcement hooks;
+- P3-002.2a: pure fail-closed Before Tool Execution composition core для
+  Agent Profile + Tool Registry + Workspace Policy + Runtime Policy +
+  trusted Human Control evidence, включая сохранение require-isolation;
+- runtime wiring и After Tool Execution enforcement hooks;
 - независимые Standards/Spec reviewer и diff-simplification gates;
 - signed, pinned и license-aware registry skills/plugins без auto-update.
 
