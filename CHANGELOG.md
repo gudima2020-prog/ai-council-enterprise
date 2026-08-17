@@ -18,7 +18,8 @@
 - Added P3-002.2a pure Before Tool Execution composition with fail-closed
   required-layer checks, exact profile fingerprint binding, canonical
   Runtime Policy isolation preservation and trusted Human Control evidence.
-- Runtime wiring and After Tool Execution enforcement remain deferred.
+- Added P3-002.2b-A trusted enforcement adapters with explicit governed ToolDefinition binding, canonical capability drift rejection, Workspace/Runtime evidence fingerprints and non-bypass composition regression.
+- Exact-scope Human Control approval, ToolExecutionRuntime wiring, Event Bus evidence and After Tool Execution enforcement remain deferred.
 
 ## v0.17.0 — P3-001 Documents Workspace — 2026-08-07
 

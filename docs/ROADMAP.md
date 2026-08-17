@@ -169,7 +169,7 @@
 
 ### P3-002 — Governed Developer Agent Profiles
 
-Статус: **в разработке; P3-002.1a, P3-002.1b и P3-002.2a реализованы**.
+Статус: **в разработке; P3-002.1a, P3-002.1b и P3-002.2a и P3-002.2b-A реализованы**.
 
 - progressive-disclosure repository policy и context checkpoints;
 - Agent Policy Profiles поверх Workspace Policy и Human Control;
@@ -180,6 +180,7 @@
   tool-capability catalog, exact fingerprint-bound active selection, Alembic
   `20260807_0058` и Human Control-bound REST API;
 - P3-002.2a: pure fail-closed Before Tool Execution composition core для
+- P3-002.2b-A: trusted Tool Registry / Workspace Policy / Runtime Policy adapters and governed ToolDefinition binding — implemented; runtime wiring deferred.
   Agent Profile + Tool Registry + Workspace Policy + Runtime Policy +
   trusted Human Control evidence, включая сохранение require-isolation;
 - runtime wiring и After Tool Execution enforcement hooks;

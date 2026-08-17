@@ -187,6 +187,57 @@ action, capabilities, domain, Workspace or canonical policy evidence.
 Verification entry point: `verify_p3_002_2a.bat`.
 
 
+
+## P3-002.2b-A — Trusted enforcement adapters
+
+Status: **implemented and under verification**.
+
+This slice introduces the trusted adapter boundary between existing platform
+policy sources and the pure P3-002.2a Before Tool Execution composition core.
+It does **not** wire enforcement into `ToolExecutionRuntime` and does not
+consume Human Control approvals.
+
+Implemented contracts:
+
+- a persisted `ToolDefinitionModel` must explicitly bind
+  `agent_policy_tool_id`, `agent_policy_action_id`, and
+  `agent_policy_runtime_operation`;
+- governed tool capabilities come from the code-defined agent capability
+  catalog, not from model output or request arguments;
+- Tool Registry capability flags must exactly match the governed boundary
+  capabilities and drift fails closed;
+- Tool Registry evaluation is integrity-checked and converted to a
+  fingerprinted `TOOL_REGISTRY` layer decision;
+- effective Workspace Policy is converted to a restrictive
+  `WORKSPACE_POLICY` layer decision; denied filesystem/network boundaries
+  remain denials and restricted network access requires approval;
+- Runtime Policy is evaluated from trusted binding + effective Workspace
+  classification and its four canonical outcomes, including
+  `REQUIRE_ISOLATION`, are preserved;
+- request Workspace and classification drift, forged governed tool identity,
+  forged action identity, and capability drift fail closed;
+- adapter and upstream decision fingerprints are deterministic and bind the
+  policy evidence used for composition.
+
+Trust-boundary preconditions for the later runtime wiring:
+
+1. `ToolDefinitionModel` must be loaded by the platform Tool Repository in the
+   execution path; an agent/model-provided object is never authoritative.
+2. The three `agent_policy_*` metadata bindings are security-sensitive
+   registry configuration. Their mutation must be governed before P3-002.2b-C
+   permits real handler execution through this adapter.
+3. `external_domain` for a network tool must be derived by trusted,
+   tool-specific code from the validated execution destination; a model claim
+   is not authoritative.
+4. One `ToolDefinition` must represent one security-relevant governed action,
+   or a trusted tool-specific action classifier must run before enforcement.
+   Model arguments must never select a less restrictive `action_id`.
+
+P3-002.2b-B remains responsible for the exact-scope, replay-safe Human Control
+approval contract. P3-002.2b-C remains responsible for
+`ToolExecutionRuntime` wiring, trusted destination/action derivation,
+approval consumption and Event Bus evidence.
+
 ### Deferred work
 
 - ToolExecutionRuntime wiring with trusted Tool Registry/Workspace Policy adapters,

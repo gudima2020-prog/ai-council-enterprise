@@ -1,3 +1,14 @@
+from backend.agent_governance.enforcement_adapters import (
+    AGENT_ENFORCEMENT_ADAPTER_SCHEMA_VERSION,
+    AGENT_POLICY_ACTION_ID_METADATA_KEY,
+    AGENT_POLICY_RUNTIME_OPERATION_METADATA_KEY,
+    AGENT_POLICY_TOOL_ID_METADATA_KEY,
+    AgentEnforcementAdapterError,
+    AgentRegistryDecisionIntegrityError,
+    AgentToolBindingIntegrityError,
+    TrustedAgentEnforcementAdapter,
+    TrustedAgentToolBinding,
+)
 from backend.agent_governance.checkpoints import (
     AGENT_CONTEXT_CHECKPOINT_SCHEMA_VERSION,
     AgentContextCheckpoint,
@@ -50,6 +61,10 @@ from backend.agent_governance.service import (
 
 
 __all__ = [
+    "AGENT_ENFORCEMENT_ADAPTER_SCHEMA_VERSION",
+    "AGENT_POLICY_ACTION_ID_METADATA_KEY",
+    "AGENT_POLICY_RUNTIME_OPERATION_METADATA_KEY",
+    "AGENT_POLICY_TOOL_ID_METADATA_KEY",
     "AGENT_BEFORE_TOOL_ENFORCEMENT_SCHEMA_VERSION",
     "AGENT_CONTEXT_CHECKPOINT_SCHEMA_VERSION",
     "AGENT_POLICY_DECISION_SCHEMA_VERSION",
@@ -60,6 +75,9 @@ __all__ = [
     "AgentCapability",
     "AgentContextCheckpoint",
     "AgentContextCheckpointIntegrityError",
+    "AgentEnforcementAdapterError",
+    "AgentRegistryDecisionIntegrityError",
+    "AgentToolBindingIntegrityError",
     "AgentEnforcementAction",
     "AgentEnforcementLayer",
     "AgentEnforcementLayerDecision",
@@ -85,6 +103,8 @@ __all__ = [
     "AgentProfileVersionRecord",
     "AgentProfileWorkspaceError",
     "AgentToolRequest",
+    "TrustedAgentEnforcementAdapter",
+    "TrustedAgentToolBinding",
     "agent_tool_capability_catalog",
     "built_in_agent_profiles",
 ]
