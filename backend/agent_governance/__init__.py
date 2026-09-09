@@ -9,6 +9,17 @@ from backend.agent_governance.enforcement_adapters import (
     TrustedAgentEnforcementAdapter,
     TrustedAgentToolBinding,
 )
+from backend.agent_governance.approval import (
+    AGENT_HUMAN_APPROVAL_SCHEMA_VERSION,
+    AGENT_HUMAN_APPROVAL_SUBJECT_TYPE,
+    AgentHumanApprovalContract,
+    AgentHumanApprovalError,
+    AgentHumanApprovalEvidence,
+    AgentHumanApprovalScopeError,
+    AgentHumanApprovalStateError,
+    AgentToolApprovalScope,
+    fingerprint_agent_tool_input,
+)
 from backend.agent_governance.checkpoints import (
     AGENT_CONTEXT_CHECKPOINT_SCHEMA_VERSION,
     AgentContextCheckpoint,
@@ -61,6 +72,15 @@ from backend.agent_governance.service import (
 
 
 __all__ = [
+    "fingerprint_agent_tool_input",
+    "AGENT_HUMAN_APPROVAL_SCHEMA_VERSION",
+    "AGENT_HUMAN_APPROVAL_SUBJECT_TYPE",
+    "AgentHumanApprovalContract",
+    "AgentHumanApprovalError",
+    "AgentHumanApprovalEvidence",
+    "AgentHumanApprovalScopeError",
+    "AgentHumanApprovalStateError",
+    "AgentToolApprovalScope",
     "AGENT_ENFORCEMENT_ADAPTER_SCHEMA_VERSION",
     "AGENT_POLICY_ACTION_ID_METADATA_KEY",
     "AGENT_POLICY_RUNTIME_OPERATION_METADATA_KEY",

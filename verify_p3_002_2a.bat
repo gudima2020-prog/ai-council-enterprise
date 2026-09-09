@@ -59,9 +59,9 @@ if errorlevel 1 exit /b 1
 
 echo.
 echo [5/6] Documentation marker...
-findstr /C:"P3-002.2a" "docs\P3_002_GOVERNED_DEVELOPER_AGENT_PROFILES.md" >nul
+%PYTHON% -c "from pathlib import Path; t=Path(r'docs\P3_002_GOVERNED_DEVELOPER_AGENT_PROFILES.md').read_text(encoding='utf-8'); a=t.find('## P3-002.2a'); b=t.find('## P3-002.2b-A',a); assert a>=0 and b>a; s=t[a:b]; assert 'Status: **implemented and verified**.' in s"
 if errorlevel 1 (
-  echo ERROR: P3-002.2a documentation marker is missing.
+  echo ERROR: P3-002.2a verified documentation section is missing.
   exit /b 1
 )
 

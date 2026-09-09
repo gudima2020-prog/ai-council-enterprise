@@ -141,7 +141,7 @@ Verification entry point: `verify_p3_002_1b.bat`.
 
 ## P3-002.2a — Before Tool Execution enforcement core
 
-Status: **implemented and under verification**.
+Status: **implemented and verified**.
 
 This slice adds a pure, deterministic and fail-closed composition boundary
 before real tool execution. It does not yet wire the decision into
@@ -190,7 +190,7 @@ Verification entry point: `verify_p3_002_2a.bat`.
 
 ## P3-002.2b-A — Trusted enforcement adapters
 
-Status: **implemented and under verification**.
+Status: **implemented and verified**.
 
 This slice introduces the trusted adapter boundary between existing platform
 policy sources and the pure P3-002.2a Before Tool Execution composition core.
@@ -233,19 +233,68 @@ Trust-boundary preconditions for the later runtime wiring:
    or a trusted tool-specific action classifier must run before enforcement.
    Model arguments must never select a less restrictive `action_id`.
 
-P3-002.2b-B remains responsible for the exact-scope, replay-safe Human Control
-approval contract. P3-002.2b-C remains responsible for
-`ToolExecutionRuntime` wiring, trusted destination/action derivation,
-approval consumption and Event Bus evidence.
+Verification entry point: `verify_p3_002_2b_a.bat`.
+
+## P3-002.2b-B - Exact-scope Human Control approval contract
+
+Status: **implemented and verified**.
+
+This slice binds the existing Policy Approval capability system to governed
+Before Tool Execution decisions without creating a second approval authority.
+
+`AgentToolApprovalScope` converts one pre-approval enforcement decision and
+one trusted tool binding into an exact `PolicyApprovalScope`. The scope binds:
+
+- Workspace;
+- governed `tool_id` and exact `action_id`;
+- selected Agent Policy Profile ID and profile fingerprint;
+- complete pre-approval Before Tool Execution decision fingerprint;
+- trusted ToolDefinition binding fingerprint;
+- canonical Runtime Policy layer fingerprint and upstream policy fingerprint;
+- Runtime Policy operation;
+- unique execution identifier;
+- SHA-256 fingerprint of the actual tool input.
+
+The approval subject payload is content-free. Raw tool input, prompts, model
+responses, credentials, secret values and approval tokens are not persisted in
+the Agent approval scope or Human Control evidence.
+
+`fingerprint_agent_tool_input()` provides a deterministic, domain-separated
+SHA-256 digest over canonical JSON. P3-002.2b-C runtime wiring must compute
+this digest from the actual trusted invocation input. An agent/model-provided
+digest is never authoritative.
+
+The Human Control contract deliberately distinguishes `approved` from
+authorization to execute. An `APPROVED` Policy Approval is insufficient.
+`HUMAN_CONTROL / ALLOW` can be constructed only from the exact
+`PolicyApprovalRecord` returned after successful one-time atomic consumption.
+
+The consumed record must retain token proof, Human Control decision actor/time,
+a valid consumption timestamp and the exact Policy Approval scope.
+
+Existing `PolicyApprovalCore` and `PolicyApprovalService` remain the canonical
+approval state machine and persistence authority. Agent Governance does not
+introduce another database table, approval API, token format or lifecycle.
+
+Any Workspace, input, execution ID, tool/action, profile, trusted binding,
+Runtime Policy or enforcement fingerprint change invalidates the approval
+scope and requires a new approval.
+
+This slice intentionally does not wire `ToolExecutionRuntime`, derive live
+network destinations, create/resume invocation states, request or consume
+approvals automatically, or publish tool-enforcement Event Bus evidence.
+
+Verification entry point: `verify_p3_002_2b_b.bat`.
 
 ### Deferred work
 
-- ToolExecutionRuntime wiring with trusted Tool Registry/Workspace Policy adapters,
-  exact-scope Human Control approval validation/consumption and Event Bus evidence;
+- P3-002.2b-C: `ToolExecutionRuntime` wiring after trusted Tool Registry
+  resolution and before invocation start, secret resolution or handler
+  execution;
+- trusted tool-specific action and external-destination derivation;
+- runtime Policy Approval request/consume coordination and resume semantics;
+- Event Bus evidence for before-tool enforcement and approval consumption;
 - After Tool Execution enforcement and evidence;
-- exact-scope Human Control approval coordination and Event Bus evidence;
 - independent Standards/Spec reviewer and simplification execution gates;
 - persisted checkpoint lifecycle and compact restore;
 - signed, pinned and license-aware skill/plugin registry.
-
-Verification entry point: `verify_p3_002_1a.bat`.

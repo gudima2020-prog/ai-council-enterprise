@@ -167,25 +167,31 @@
   content boundary, exact result citations, complete external-reviewer
   disclosure, token cleanup и persisted failed-run UI handling.
 
-### P3-002 — Governed Developer Agent Profiles
+### P3-002 ? Governed Developer Agent Profiles
 
-Статус: **в разработке; P3-002.1a, P3-002.1b и P3-002.2a и P3-002.2b-A реализованы**.
+??????: **? ??????????; P3-002.1a, P3-002.1b, P3-002.2a, P3-002.2b-A ? P3-002.2b-B ???????????**.
 
-- progressive-disclosure repository policy и context checkpoints;
-- Agent Policy Profiles поверх Workspace Policy и Human Control;
-- P3-002.1a: immutable manifests, exact tool-capability bindings, шесть audited
-  built-in profiles, deterministic allow/require-approval/deny evaluation и
-  content-free checkpoint с integrity fingerprint;
+- progressive-disclosure repository policy ? context checkpoints;
+- Agent Policy Profiles ?????? Workspace Policy ? Human Control;
+- P3-002.1a: immutable manifests, exact tool-capability bindings, ????? audited
+  built-in profiles, deterministic allow/require-approval/deny evaluation ?
+  content-free checkpoint ? integrity fingerprint;
 - P3-002.1b: Workspace-scoped immutable custom profile versions, trusted
   tool-capability catalog, exact fingerprint-bound active selection, Alembic
-  `20260807_0058` и Human Control-bound REST API;
-- P3-002.2a: pure fail-closed Before Tool Execution composition core для
-- P3-002.2b-A: trusted Tool Registry / Workspace Policy / Runtime Policy adapters and governed ToolDefinition binding — implemented; runtime wiring deferred.
+  `20260807_0058` ? Human Control-bound REST API;
+- P3-002.2a: pure fail-closed Before Tool Execution composition core ???
   Agent Profile + Tool Registry + Workspace Policy + Runtime Policy +
-  trusted Human Control evidence, включая сохранение require-isolation;
-- runtime wiring и After Tool Execution enforcement hooks;
-- независимые Standards/Spec reviewer и diff-simplification gates;
-- signed, pinned и license-aware registry skills/plugins без auto-update.
+  trusted Human Control evidence, ??????? ?????????? require-isolation;
+- P3-002.2b-A: trusted Tool Registry / Workspace Policy / Runtime Policy
+  adapters, governed ToolDefinition binding ? fail-closed capability drift;
+- P3-002.2b-B: exact-scope Human Control approval contract ?????? canonical
+  Policy Approval, consumed-only Human Control ALLOW, trusted input
+  fingerprint ? replay/scope-change guards;
+- P3-002.2b-C: runtime wiring, trusted action/destination derivation,
+  approval request/consume coordination ? Event Bus evidence ? ?????;
+- After Tool Execution enforcement hooks;
+- ??????????? Standards/Spec reviewer ? diff-simplification gates;
+- signed, pinned ? license-aware registry skills/plugins ??? auto-update.
 
 ### P3-003 — Governed Local Utilities Workspace
 

@@ -19,7 +19,15 @@
   required-layer checks, exact profile fingerprint binding, canonical
   Runtime Policy isolation preservation and trusted Human Control evidence.
 - Added P3-002.2b-A trusted enforcement adapters with explicit governed ToolDefinition binding, canonical capability drift rejection, Workspace/Runtime evidence fingerprints and non-bypass composition regression.
-- Exact-scope Human Control approval, ToolExecutionRuntime wiring, Event Bus evidence and After Tool Execution enforcement remain deferred.
+- Added P3-002.2b-B exact-scope Human Control approval binding over the
+  existing Policy Approval state machine, including execution/tool/action/
+  profile/enforcement/runtime/input fingerprints and consumed-only Human
+  Control ALLOW evidence.
+- `APPROVED` alone is never execution authority; governed Human Control ALLOW
+  requires the exact one-time consumed Policy Approval record.
+- ToolExecutionRuntime wiring, trusted live action/destination derivation,
+  approval coordination, Event Bus evidence and After Tool Execution
+  enforcement remain deferred.
 
 ## v0.17.0 — P3-001 Documents Workspace — 2026-08-07
 
