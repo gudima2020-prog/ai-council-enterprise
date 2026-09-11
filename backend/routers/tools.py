@@ -7,6 +7,15 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_container, get_db_session
 from backend.core.container import AppContainer
+from backend.control_center.governance_schemas import (
+    HumanControlPermission,
+)
+from backend.control_center.security import (
+    HumanControlPrincipal,
+    HumanControlSecurityError,
+    require_permission,
+    security_http_exception,
+)
 from backend.orchestration.tool_runtime import (
     ToolExecutionError,
     ToolExecutionRuntime,
@@ -35,6 +44,47 @@ def get_tool_service(
     return container.tool_registry_service(session)
 
 
+def _enforce_tool_workspace(
+    tool_workspace_id: str | None,
+    principal: HumanControlPrincipal,
+) -> None:
+    """Prevent a Workspace-bound operator from mutating another scope."""
+
+    if not principal.authenticated or principal.workspace_id is None:
+        return
+
+    if tool_workspace_id != principal.workspace_id:
+        try:
+            raise HumanControlSecurityError(
+                "Tool belongs to another Workspace or to the global scope."
+            )
+        except HumanControlSecurityError as exc:
+            raise security_http_exception(exc) from exc
+
+
+def _bind_tool_create_workspace(
+    request: ToolCreate,
+    principal: HumanControlPrincipal,
+) -> ToolCreate:
+    if not principal.authenticated or principal.workspace_id is None:
+        return request
+
+    if (
+        request.workspace_id is not None
+        and request.workspace_id != principal.workspace_id
+    ):
+        try:
+            raise HumanControlSecurityError(
+                "Tool creation targets another Workspace."
+            )
+        except HumanControlSecurityError as exc:
+            raise security_http_exception(exc) from exc
+
+    return request.model_copy(
+        update={"workspace_id": principal.workspace_id}
+    )
+
+
 def get_tool_runtime(
     container: AppContainer = Depends(get_container),
 ) -> ToolExecutionRuntime:
@@ -58,7 +108,13 @@ def tool_runtime_status(
 async def create_tool(
     request: ToolCreate,
     service: ToolRegistryService = Depends(get_tool_service),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.MANAGE_POLICIES.value
+        )
+    ),
 ) -> dict[str, Any]:
+    request = _bind_tool_create_workspace(request, principal)
     try:
         return await service.create(request)
     except ToolRegistryError as exc:
@@ -105,7 +161,17 @@ async def update_tool(
     tool_id: str,
     request: ToolUpdate,
     service: ToolRegistryService = Depends(get_tool_service),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.MANAGE_POLICIES.value
+        )
+    ),
 ) -> dict[str, Any]:
+    current = service.get(tool_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Tool ?? ??????.")
+    _enforce_tool_workspace(current["workspace_id"], principal)
+
     result = await service.update(tool_id, request)
     if result is None:
         raise HTTPException(status_code=404, detail="Tool не найден.")
@@ -116,7 +182,17 @@ async def update_tool(
 async def delete_tool(
     tool_id: str,
     service: ToolRegistryService = Depends(get_tool_service),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.MANAGE_POLICIES.value
+        )
+    ),
 ) -> dict[str, bool]:
+    current = service.get(tool_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Tool ?? ??????.")
+    _enforce_tool_workspace(current["workspace_id"], principal)
+
     try:
         deleted = await service.delete(tool_id)
     except ToolRegistryError as exc:
@@ -131,7 +207,45 @@ async def add_tool_permission(
     tool_id: str,
     request: ToolPermissionCreate,
     service: ToolRegistryService = Depends(get_tool_service),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.MANAGE_POLICIES.value
+        )
+    ),
 ) -> dict[str, Any]:
+    current = service.get(tool_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Tool ?? ??????.")
+    _enforce_tool_workspace(current["workspace_id"], principal)
+
+    if principal.authenticated and principal.workspace_id is not None:
+        if (
+            request.workspace_id is not None
+            and request.workspace_id != principal.workspace_id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Permission targets another Workspace.",
+            )
+        request = request.model_copy(
+            update={"workspace_id": principal.workspace_id}
+        )
+
+    if principal.authenticated:
+        actor_id = principal.actor_id or principal.identity_id
+        if actor_id:
+            if request.created_by and request.created_by != actor_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "Permission created_by does not match "
+                        "the authenticated operator."
+                    ),
+                )
+            request = request.model_copy(
+                update={"created_by": actor_id}
+            )
+
     try:
         result = await service.add_permission(tool_id, request)
     except ToolRegistryError as exc:
@@ -157,7 +271,40 @@ async def delete_tool_permission(
     tool_id: str,
     permission_id: str,
     service: ToolRegistryService = Depends(get_tool_service),
+    principal: HumanControlPrincipal = Depends(
+        require_permission(
+            HumanControlPermission.MANAGE_POLICIES.value
+        )
+    ),
 ) -> dict[str, bool]:
+    current = service.get(tool_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Tool ?? ??????.")
+    _enforce_tool_workspace(current["workspace_id"], principal)
+
+    permissions = service.list_permissions(tool_id)
+    if permissions is None:
+        raise HTTPException(status_code=404, detail="Tool ?? ??????.")
+
+    permission = next(
+        (
+            item
+            for item in permissions
+            if item["id"] == permission_id
+        ),
+        None,
+    )
+    if permission is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Permission ?? ???????.",
+        )
+
+    _enforce_tool_workspace(
+        permission["workspace_id"],
+        principal,
+    )
+
     result = await service.delete_permission(tool_id, permission_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Tool не найден.")

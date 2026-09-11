@@ -6,6 +6,9 @@ from typing import Iterator
 
 from sqlalchemy.orm import Session
 
+from backend.agent_governance.runtime import (
+    AgentToolRuntimeGovernance,
+)
 from backend.autonomy.forecast import MissionForecastService
 from backend.autonomy.learning import MissionLearningService
 from backend.autonomy.governance import MissionGovernanceService
@@ -176,6 +179,17 @@ class AppContainer:
         self.tool_execution_runtime = ToolExecutionRuntime(
             event_bus=self.event_bus,
             secret_manager=self.secret_manager_service,
+            agent_governance=AgentToolRuntimeGovernance(
+                workspace_policy_resolver=(
+                    lambda session, workspace_id: (
+                        self.workspace_policy_service(
+                            session
+                        ).get_effective_policy(
+                            workspace_id
+                        )
+                    )
+                ),
+            ),
         )
         self.execution_plan_runtime = ToolAwareExecutionPlanRuntime(
             event_bus=self.event_bus,

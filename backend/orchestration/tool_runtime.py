@@ -11,6 +11,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from backend.agent_governance.runtime import (
+    AgentToolRuntimeGovernance,
+    AgentToolRuntimeGovernanceError,
+)
+
 from backend.core.events import Event, EventBus
 from backend.database.session import session_scope
 from backend.orchestration.enums import ExecutionStepType
@@ -314,10 +319,12 @@ class ToolExecutionRuntime:
         event_bus: EventBus,
         session_factory: SessionContextFactory = session_scope,
         secret_manager: SecretManagerService | None = None,
+        agent_governance: AgentToolRuntimeGovernance | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._session_factory = session_factory
         self._secret_manager = secret_manager
+        self._agent_governance = agent_governance
         self._handlers = ToolHandlerRegistry()
         self._sandbox = ToolSandbox()
         self._started = 0
@@ -342,6 +349,9 @@ class ToolExecutionRuntime:
             "denied": self._denied,
             "timed_out": self._timed_out,
             "registered_handlers": self._handlers.keys(),
+            "agent_governance_enabled": (
+                self._agent_governance is not None
+            ),
             "isolation": {
                 "mode": "application_restricted",
                 "os_process_boundary": False,
@@ -435,14 +445,63 @@ class ToolExecutionRuntime:
             if tool is None:
                 raise ToolNotFound(f"Tool не зарегистрирован: {tool_key}.")
 
-            policy = service.evaluate(
+            registry_policy = service.evaluate(
                 tool=tool,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 input_data=input_data,
             )
 
-            if not policy["allowed"]:
+            policy = deepcopy(registry_policy)
+            agent_gate = None
+            governance_failure = False
+            deny_reasons = list(
+                registry_policy.get("reasons", [])
+            )
+
+            if (
+                registry_policy["allowed"]
+                and self._agent_governance is not None
+            ):
+                try:
+                    agent_gate = self._agent_governance.evaluate(
+                        session=session,
+                        tool=tool,
+                        registry_decision=registry_policy,
+                        workspace_id=workspace_id,
+                        agent_id=agent_id,
+                        input_data=input_data,
+                    )
+                except AgentToolRuntimeGovernanceError as exc:
+                    governance_failure = True
+                    deny_reasons = [
+                        "agent_governance_failed_closed"
+                    ]
+                    policy["agent_governance"] = {
+                        "failed_closed": True,
+                        "error_type": exc.__class__.__name__,
+                    }
+                else:
+                    if agent_gate is not None:
+                        policy["agent_governance"] = (
+                            agent_gate.to_policy_dict()
+                        )
+                        if not agent_gate.decision.executable:
+                            deny_reasons = list(
+                                agent_gate.decision.reason_codes
+                            )
+
+            execution_allowed = (
+                bool(registry_policy["allowed"])
+                and not governance_failure
+                and (
+                    agent_gate is None
+                    or agent_gate.decision.executable
+                )
+            )
+            policy["execution_allowed"] = execution_allowed
+
+            if not execution_allowed:
                 invocation = repository.create_invocation(
                     tool=tool,
                     tool_key=tool.tool_key,
@@ -455,10 +514,13 @@ class ToolExecutionRuntime:
                     isolation_mode=tool.isolation_mode,
                     input_data=deepcopy(input_data),
                     policy=policy,
-                    error="; ".join(policy["reasons"]),
+                    error="; ".join(deny_reasons),
                 )
                 invocation_id = invocation.id
-                error = invocation.error or "Tool execution denied."
+                error = (
+                    invocation.error
+                    or "Tool execution denied."
+                )
             else:
                 invocation = repository.create_invocation(
                     tool=tool,
@@ -493,6 +555,36 @@ class ToolExecutionRuntime:
                 "metadata_json": deepcopy(tool.metadata_json),
             }
 
+        if agent_gate is not None:
+            await self._event_bus.publish(
+                Event(
+                    event_type="agent.tool.enforcement.evaluated",
+                    source="tool_execution_runtime",
+                    workspace_id=workspace_id,
+                    correlation_id=correlation_id,
+                    payload=agent_gate.event_payload(
+                        invocation_id=invocation_id
+                    ),
+                )
+            )
+        elif governance_failure:
+            await self._event_bus.publish(
+                Event(
+                    event_type="agent.tool.enforcement.failed_closed",
+                    source="tool_execution_runtime",
+                    workspace_id=workspace_id,
+                    correlation_id=correlation_id,
+                    payload={
+                        "invocation_id": invocation_id,
+                        "tool_id": tool_snapshot["id"],
+                        "tool_key": tool_snapshot["tool_key"],
+                        "reason_codes": [
+                            "AGENT_GOVERNANCE_FAILED_CLOSED"
+                        ],
+                    },
+                )
+            )
+
         if error is not None:
             self._denied += 1
             await self._event_bus.publish(
@@ -505,7 +597,7 @@ class ToolExecutionRuntime:
                         "invocation_id": invocation_id,
                         "tool_id": tool_snapshot["id"],
                         "tool_key": tool_snapshot["tool_key"],
-                        "reasons": policy["reasons"],
+                        "reasons": deny_reasons,
                     },
                 )
             )

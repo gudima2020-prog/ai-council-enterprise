@@ -1,3 +1,10 @@
+from backend.agent_governance.runtime import (
+    AGENT_TOOL_RUNTIME_GOVERNANCE_SCHEMA_VERSION,
+    AgentToolRuntimeBoundaryUnavailableError,
+    AgentToolRuntimeGate,
+    AgentToolRuntimeGovernance,
+    AgentToolRuntimeGovernanceError,
+)
 from backend.agent_governance.enforcement_adapters import (
     AGENT_ENFORCEMENT_ADAPTER_SCHEMA_VERSION,
     AGENT_POLICY_ACTION_ID_METADATA_KEY,
@@ -72,6 +79,11 @@ from backend.agent_governance.service import (
 
 
 __all__ = [
+    "AGENT_TOOL_RUNTIME_GOVERNANCE_SCHEMA_VERSION",
+    "AgentToolRuntimeBoundaryUnavailableError",
+    "AgentToolRuntimeGate",
+    "AgentToolRuntimeGovernance",
+    "AgentToolRuntimeGovernanceError",
     "fingerprint_agent_tool_input",
     "AGENT_HUMAN_APPROVAL_SCHEMA_VERSION",
     "AGENT_HUMAN_APPROVAL_SUBJECT_TYPE",
