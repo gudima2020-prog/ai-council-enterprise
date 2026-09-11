@@ -8,9 +8,18 @@ from copy import deepcopy
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from backend.agent_governance.approval import (
+    AgentHumanApprovalContract,
+    AgentHumanApprovalError,
+    fingerprint_agent_tool_input,
+)
+from backend.agent_governance.enforcement import (
+    AgentEnforcementAction,
+)
 from backend.agent_governance.runtime import (
     AgentToolRuntimeGovernance,
     AgentToolRuntimeGovernanceError,
@@ -32,6 +41,16 @@ from backend.orchestration.tools import (
     ToolRegistryService,
     ToolRepository,
 )
+from backend.policy_approvals.core import (
+    PolicyApprovalScopeError,
+    PolicyApprovalStateError,
+    PolicyApprovalTokenError,
+)
+from backend.policy_approvals.service import (
+    PolicyApprovalNotFoundError,
+    PolicyApprovalService,
+    PolicyApprovalWorkspaceError,
+)
 from backend.secrets.injection import SecretLeaseAccessor, build_secret_accessor
 from backend.secrets.schemas import SecretResolveContext
 from backend.secrets.service import SecretManagerService
@@ -40,7 +59,59 @@ from backend.secrets.service import SecretManagerService
 SessionContextFactory = Callable[[], AbstractContextManager[Session]]
 
 
+_AGENT_TOOL_APPROVAL_REQUEST_SCHEMA_VERSION = (
+    "p3-002.2b-c2.1.direct-approval-request"
+)
+_AGENT_TOOL_APPROVAL_CONSUME_SCHEMA_VERSION = (
+    "p3-002.2b-c2.2.direct-approval-consume"
+)
+
+
 class ToolExecutionError(RuntimeError):
+    pass
+
+
+class ToolApprovalRequired(ToolExecutionError):
+    'Typed direct-execution approval precondition.'
+
+    def __init__(
+        self,
+        *,
+        execution_id: str,
+        approval_id: str,
+        scope_fingerprint: str,
+        expires_at: str,
+        reason_codes: tuple[str, ...],
+        created: bool,
+    ) -> None:
+        super().__init__("Human Control approval is required.")
+        self.execution_id = execution_id
+        self.approval_id = approval_id
+        self.scope_fingerprint = scope_fingerprint
+        self.expires_at = expires_at
+        self.reason_codes = tuple(reason_codes)
+        self.created = bool(created)
+
+    def to_detail(self) -> dict[str, Any]:
+        return {
+            "schema_version": (
+                _AGENT_TOOL_APPROVAL_REQUEST_SCHEMA_VERSION
+            ),
+            "code": "AGENT_TOOL_APPROVAL_REQUIRED",
+            "execution_id": self.execution_id,
+            "approval_id": self.approval_id,
+            "scope_fingerprint": self.scope_fingerprint,
+            "expires_at": self.expires_at,
+            "reason_codes": list(self.reason_codes),
+            "created": self.created,
+        }
+
+
+class ToolApprovalCredentialError(ToolExecutionError):
+    pass
+
+
+class ToolApprovalConflictError(ToolExecutionError):
     pass
 
 
@@ -233,6 +304,35 @@ class ToolSandbox:
     def __init__(self) -> None:
         self._semaphores: dict[str, tuple[int, asyncio.Semaphore]] = {}
 
+    @classmethod
+    def validate_input(
+        cls,
+        *,
+        tool: Any,
+        input_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        'Canonicalize and validate input at the real tool boundary.'
+
+        clean_input, input_size = cls._json_round_trip(input_data)
+
+        if input_size > tool.max_input_bytes:
+            raise ToolPayloadLimitError(
+                "Tool input превышает max_input_bytes: "
+                f"{input_size} > {tool.max_input_bytes}."
+            )
+
+        JsonSchemaValidator.validate(
+            clean_input,
+            tool.input_schema_json,
+        )
+
+        if not isinstance(clean_input, dict):
+            raise ToolSchemaValidationError(
+                "Tool input boundary requires an object."
+            )
+
+        return clean_input
+
     async def execute(
         self,
         *,
@@ -240,14 +340,10 @@ class ToolSandbox:
         handler: ToolHandler,
         context: ToolExecutionContext,
     ) -> dict[str, Any]:
-        clean_input, input_size = self._json_round_trip(context.input)
-        if input_size > tool.max_input_bytes:
-            raise ToolPayloadLimitError(
-                "Tool input превышает max_input_bytes: "
-                f"{input_size} > {tool.max_input_bytes}."
-            )
-
-        JsonSchemaValidator.validate(clean_input, tool.input_schema_json)
+        clean_input = self.validate_input(
+            tool=tool,
+            input_data=context.input,
+        )
 
         safe_context = ToolExecutionContext(
             invocation_id=context.invocation_id,
@@ -410,6 +506,11 @@ class ToolExecutionRuntime:
             step_id=None,
             correlation_id=request.correlation_id,
             input_data=request.input,
+            approval_execution_id=(
+                request.approval_execution_id
+            ),
+            approval_id=request.approval_id,
+            approval_token=request.approval_token,
             exact_tool_id=tool_id,
         )
         return {
@@ -432,8 +533,55 @@ class ToolExecutionRuntime:
         step_id: str | None,
         correlation_id: str | None,
         input_data: dict[str, Any],
+        approval_execution_id: str | None = None,
+        approval_id: str | None = None,
+        approval_token: str | None = None,
         exact_tool_id: str | None = None,
     ) -> tuple[dict[str, Any], str]:
+        approval_values = (
+            approval_execution_id,
+            approval_id,
+            approval_token,
+        )
+        approval_any = any(
+            value is not None
+            for value in approval_values
+        )
+        approval_bundle_present = all(
+            isinstance(value, str) and bool(value)
+            for value in approval_values
+        )
+
+        if approval_any and not approval_bundle_present:
+            raise ToolApprovalCredentialError(
+                "Incomplete Human Control approval credentials."
+            )
+
+        if approval_bundle_present:
+            if (
+                len(approval_execution_id or "") > 128
+                or len(approval_id or "") > 64
+                or not (32 <= len(approval_token or "") <= 1024)
+            ):
+                raise ToolApprovalCredentialError(
+                    "Invalid Human Control approval credential shape."
+                )
+
+        if approval_bundle_present and workspace_id is None:
+            raise ToolApprovalCredentialError(
+                "Approval credentials require a Workspace."
+            )
+
+        if approval_bundle_present and (
+            exact_tool_id is None
+            or plan_id is not None
+            or step_id is not None
+        ):
+            raise ToolApprovalConflictError(
+                "Approval resubmission is supported only for "
+                "direct exact-tool execution."
+            )
+
         with self._session_factory() as session:
             repository = ToolRepository(session)
             service = ToolRegistryService(repository, self._event_bus)
@@ -491,6 +639,306 @@ class ToolExecutionRuntime:
                                 agent_gate.decision.reason_codes
                             )
 
+            approval_consumed_event_payload: dict[str, Any] | None = None
+
+            if (
+                approval_bundle_present
+                and bool(registry_policy["allowed"])
+                and not governance_failure
+            ):
+                if agent_gate is None:
+                    raise ToolApprovalConflictError(
+                        "Approval credentials do not belong to a "
+                        "currently governed tool execution."
+                    )
+
+                if (
+                    agent_gate.decision.action
+                    == AgentEnforcementAction.REQUIRE_APPROVAL
+                    and agent_gate.decision.approval_required
+                    and not agent_gate.decision.isolation_required
+                ):
+                    validated_input = self._sandbox.validate_input(
+                        tool=tool,
+                        input_data=input_data,
+                    )
+                    validated_input_fingerprint = (
+                        fingerprint_agent_tool_input(
+                            validated_input
+                        )
+                    )
+
+                    if (
+                        validated_input_fingerprint
+                        != agent_gate.input_fingerprint
+                    ):
+                        raise ToolApprovalConflictError(
+                            "Validated tool input fingerprint changed "
+                            "during approval resubmission."
+                        )
+
+                    try:
+                        expected_scope = (
+                            AgentHumanApprovalContract.build_scope(
+                                decision=agent_gate.decision,
+                                binding=agent_gate.binding,
+                                execution_id=(
+                                    approval_execution_id
+                                    or ""
+                                ),
+                                input_fingerprint=(
+                                    validated_input_fingerprint
+                                ),
+                            )
+                        )
+                    except AgentHumanApprovalError as exc:
+                        raise ToolApprovalConflictError(
+                            "Approval scope does not match the "
+                            "current tool execution."
+                        ) from exc
+
+                    approval_service = PolicyApprovalService(
+                        session=session,
+                        event_bus=self._event_bus,
+                    )
+
+                    try:
+                        consumed_record = (
+                            await approval_service.consume(
+                                approval_id=approval_id or "",
+                                workspace_id=workspace_id or "",
+                                token=approval_token or "",
+                                scope=(
+                                    expected_scope.policy_scope
+                                ),
+                            )
+                        )
+                    except PolicyApprovalTokenError as exc:
+                        raise ToolApprovalCredentialError(
+                            "Human Control approval token is invalid."
+                        ) from exc
+                    except (
+                        PolicyApprovalScopeError,
+                        PolicyApprovalStateError,
+                        PolicyApprovalNotFoundError,
+                        PolicyApprovalWorkspaceError,
+                    ) as exc:
+                        raise ToolApprovalConflictError(
+                            "Human Control approval is stale, "
+                            "unavailable, or outside the exact scope."
+                        ) from exc
+
+                    try:
+                        approval_evidence = (
+                            AgentHumanApprovalContract
+                            .evidence_from_consumed(
+                                record=consumed_record,
+                                expected_scope=expected_scope,
+                            )
+                        )
+
+                        if self._agent_governance is None:
+                            raise AgentToolRuntimeGovernanceError(
+                                "Agent governance disappeared during "
+                                "approval finalization."
+                            )
+
+                        agent_gate = (
+                            self._agent_governance
+                            .finalize_with_consumed_approval(
+                                gate=agent_gate,
+                                record=consumed_record,
+                                expected_scope=expected_scope,
+                            )
+                        )
+                    except (
+                        AgentHumanApprovalError,
+                        AgentToolRuntimeGovernanceError,
+                    ) as exc:
+                        raise ToolExecutionError(
+                            "Consumed Human Control approval "
+                            "failed closed during finalization."
+                        ) from exc
+
+                    if (
+                        not agent_gate.decision.executable
+                        or agent_gate.decision.action
+                        != AgentEnforcementAction.ALLOW
+                        or agent_gate.decision.approval_required
+                        or agent_gate.decision.isolation_required
+                    ):
+                        raise ToolExecutionError(
+                            "Human Control approval did not produce "
+                            "an executable final decision."
+                        )
+
+                    policy["agent_governance"] = (
+                        agent_gate.to_policy_dict()
+                    )
+                    policy["agent_approval"] = {
+                        "schema_version": (
+                            _AGENT_TOOL_APPROVAL_CONSUME_SCHEMA_VERSION
+                        ),
+                        "execution_id": (
+                            expected_scope.execution_id
+                        ),
+                        "evidence": (
+                            approval_evidence.to_dict()
+                        ),
+                        "evidence_fingerprint": (
+                            approval_evidence.fingerprint
+                        ),
+                    }
+
+                    approval_consumed_event_payload = {
+                        "schema_version": (
+                            _AGENT_TOOL_APPROVAL_CONSUME_SCHEMA_VERSION
+                        ),
+                        "execution_id": (
+                            expected_scope.execution_id
+                        ),
+                        "approval_id": (
+                            approval_evidence.approval_id
+                        ),
+                        "scope_fingerprint": (
+                            approval_evidence.scope_fingerprint
+                        ),
+                        "evidence_fingerprint": (
+                            approval_evidence.fingerprint
+                        ),
+                        "registry_tool_id": (
+                            agent_gate.binding.registry_tool_id
+                        ),
+                        "governed_tool_id": (
+                            agent_gate.binding.governed_tool_id
+                        ),
+                        "action_id": (
+                            agent_gate.binding.action_id
+                        ),
+                        "profile_id": (
+                            agent_gate.profile.profile_id
+                        ),
+                        "profile_fingerprint": (
+                            agent_gate.profile.fingerprint
+                        ),
+                        "binding_fingerprint": (
+                            agent_gate.binding.fingerprint
+                        ),
+                        "input_fingerprint": (
+                            agent_gate.input_fingerprint
+                        ),
+                        "decision_fingerprint": (
+                            agent_gate.decision.fingerprint
+                        ),
+                        "consumed_at": (
+                            approval_evidence
+                            .consumed_at
+                            .isoformat()
+                        ),
+                    }
+
+                elif (
+                    agent_gate.decision.action
+                    == AgentEnforcementAction.ALLOW
+                ):
+                    raise ToolApprovalConflictError(
+                        "Approval credentials are stale because "
+                        "the current execution no longer requires "
+                        "Human Control approval."
+                    )
+                # DENY / REQUIRE_ISOLATION intentionally fall through.
+                # Canonical deny/isolation wins without consuming token.
+
+            approval_required_error: ToolApprovalRequired | None = None
+
+            direct_approval_required = (
+                agent_gate is not None
+                and not governance_failure
+                and bool(registry_policy["allowed"])
+                and agent_gate.decision.action
+                == AgentEnforcementAction.REQUIRE_APPROVAL
+                and agent_gate.decision.approval_required
+                and not agent_gate.decision.isolation_required
+                and exact_tool_id is not None
+                and plan_id is None
+                and step_id is None
+                and not approval_bundle_present
+            )
+
+            if direct_approval_required:
+                validated_input = self._sandbox.validate_input(
+                    tool=tool,
+                    input_data=input_data,
+                )
+
+                validated_input_fingerprint = (
+                    fingerprint_agent_tool_input(
+                        validated_input
+                    )
+                )
+
+                if (
+                    validated_input_fingerprint
+                    != agent_gate.input_fingerprint
+                ):
+                    raise ToolExecutionError(
+                        "Validated tool input fingerprint changed "
+                        "during approval preparation."
+                    )
+
+                execution_id = (
+                    "agent_tool_exec_" + uuid4().hex
+                )
+
+                try:
+                    approval_scope = (
+                        AgentHumanApprovalContract.build_scope(
+                            decision=agent_gate.decision,
+                            binding=agent_gate.binding,
+                            execution_id=execution_id,
+                            input_fingerprint=(
+                                validated_input_fingerprint
+                            ),
+                        )
+                    )
+
+                    approval_result = await PolicyApprovalService(
+                        session=session,
+                        event_bus=self._event_bus,
+                    ).request(
+                        scope=approval_scope.policy_scope,
+                        reason_codes=(
+                            agent_gate.decision.reason_codes
+                        ),
+                        requested_by="tool_execution_runtime",
+                        metadata={
+                            "schema_version": (
+                                _AGENT_TOOL_APPROVAL_REQUEST_SCHEMA_VERSION
+                            ),
+                            "source": "tool_execution_runtime",
+                        },
+                    )
+                except (AgentHumanApprovalError, ValueError) as exc:
+                    raise ToolExecutionError(
+                        "Agent tool approval request "
+                        "failed closed."
+                    ) from exc
+
+                approval_required_error = ToolApprovalRequired(
+                    execution_id=approval_scope.execution_id,
+                    approval_id=approval_result.record.id,
+                    scope_fingerprint=(
+                        approval_scope.fingerprint
+                    ),
+                    expires_at=(
+                        approval_result.record.expires_at.isoformat()
+                    ),
+                    reason_codes=(
+                        agent_gate.decision.reason_codes
+                    ),
+                    created=approval_result.created,
+                )
+
             execution_allowed = (
                 bool(registry_policy["allowed"])
                 and not governance_failure
@@ -501,7 +949,11 @@ class ToolExecutionRuntime:
             )
             policy["execution_allowed"] = execution_allowed
 
-            if not execution_allowed:
+            if approval_required_error is not None:
+                # PENDING approval is not an execution attempt.
+                invocation_id = None
+                error = None
+            elif not execution_allowed:
                 invocation = repository.create_invocation(
                     tool=tool,
                     tool_key=tool.tool_key,
@@ -554,6 +1006,60 @@ class ToolExecutionRuntime:
                 "allow_filesystem_write": tool.allow_filesystem_write,
                 "metadata_json": deepcopy(tool.metadata_json),
             }
+
+        if approval_consumed_event_payload is not None:
+            await self._event_bus.publish(
+                Event(
+                    event_type="agent.tool.approval.consumed",
+                    source="tool_execution_runtime",
+                    workspace_id=workspace_id,
+                    correlation_id=correlation_id,
+                    payload=approval_consumed_event_payload,
+                )
+            )
+
+        if approval_required_error is not None:
+            if agent_gate is None:
+                raise ToolExecutionError(
+                    "Approval state lost its trusted governance gate."
+                )
+
+            await self._event_bus.publish(
+                Event(
+                    event_type="agent.tool.approval.required",
+                    source="tool_execution_runtime",
+                    workspace_id=workspace_id,
+                    correlation_id=correlation_id,
+                    payload={
+                        **approval_required_error.to_detail(),
+                        "registry_tool_id": (
+                            agent_gate.binding.registry_tool_id
+                        ),
+                        "governed_tool_id": (
+                            agent_gate.binding.governed_tool_id
+                        ),
+                        "action_id": (
+                            agent_gate.binding.action_id
+                        ),
+                        "profile_id": (
+                            agent_gate.profile.profile_id
+                        ),
+                        "profile_fingerprint": (
+                            agent_gate.profile.fingerprint
+                        ),
+                        "binding_fingerprint": (
+                            agent_gate.binding.fingerprint
+                        ),
+                        "input_fingerprint": (
+                            agent_gate.input_fingerprint
+                        ),
+                        "decision_fingerprint": (
+                            agent_gate.decision.fingerprint
+                        ),
+                    },
+                )
+            )
+            raise approval_required_error
 
         if agent_gate is not None:
             await self._event_bus.publish(

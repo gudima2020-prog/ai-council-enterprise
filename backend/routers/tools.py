@@ -17,6 +17,9 @@ from backend.control_center.security import (
     security_http_exception,
 )
 from backend.orchestration.tool_runtime import (
+    ToolApprovalConflictError,
+    ToolApprovalCredentialError,
+    ToolApprovalRequired,
     ToolExecutionError,
     ToolExecutionRuntime,
 )
@@ -341,6 +344,21 @@ async def execute_tool(
 ) -> dict[str, Any]:
     try:
         result = await runtime.execute_direct(tool_id, request)
+    except ToolApprovalRequired as exc:
+        raise HTTPException(
+            status_code=428,
+            detail=exc.to_detail(),
+        ) from exc
+    except ToolApprovalCredentialError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail=str(exc),
+        ) from exc
+    except ToolApprovalConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
     except ToolPermissionDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ToolExecutionError as exc:

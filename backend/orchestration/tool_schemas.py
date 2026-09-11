@@ -112,10 +112,27 @@ class ToolPermissionEvaluationRequest(BaseModel):
 class DirectToolExecutionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    workspace_id: str | None = None
-    agent_id: str | None = None
+    workspace_id: str | None = Field(default=None, max_length=64)
+    agent_id: str | None = Field(default=None, max_length=255)
     input: dict[str, Any] = Field(default_factory=dict)
     correlation_id: str | None = Field(default=None, max_length=255)
+    approval_execution_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-zA-Z0-9._:-]+$",
+    )
+    approval_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9._:-]+$",
+    )
+    approval_token: str | None = Field(
+        default=None,
+        repr=False,
+        json_schema_extra={"writeOnly": True},
+    )
 
 
 class ToolHandlerRegistrationRequest(BaseModel):

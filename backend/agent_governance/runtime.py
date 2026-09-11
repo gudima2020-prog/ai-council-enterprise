@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from backend.agent_governance.approval import (
+    AgentHumanApprovalContract,
+    AgentHumanApprovalError,
+    AgentToolApprovalScope,
     fingerprint_agent_tool_input,
 )
 from backend.agent_governance.core import (
@@ -34,6 +37,7 @@ from backend.agent_governance.service import (
 )
 from backend.orchestration.models import ToolDefinitionModel
 from backend.runtime_policy import RuntimeTrust
+from backend.policy_approvals.core import PolicyApprovalRecord
 from backend.services.workspace_policy import (
     EffectiveWorkspacePolicy,
 )
@@ -78,6 +82,20 @@ class AgentToolRuntimeGate:
     runtime_layer: AgentEnforcementLayerDecision
     decision: AgentBeforeToolExecutionDecision
     input_fingerprint: str
+    human_control_layer: AgentEnforcementLayerDecision | None = None
+
+    @property
+    def layer_decisions(
+        self,
+    ) -> tuple[AgentEnforcementLayerDecision, ...]:
+        layers = (
+            self.registry_layer,
+            self.workspace_layer,
+            self.runtime_layer,
+        )
+        if self.human_control_layer is None:
+            return layers
+        return (*layers, self.human_control_layer)
 
     def to_policy_dict(self) -> dict[str, Any]:
         return {
@@ -105,11 +123,7 @@ class AgentToolRuntimeGate:
                     "reason_codes": list(item.reason_codes),
                     "fingerprint": item.fingerprint,
                 }
-                for item in (
-                    self.registry_layer,
-                    self.workspace_layer,
-                    self.runtime_layer,
-                )
+                for item in self.layer_decisions
             ],
             "decision": {
                 "action": self.decision.action.value,
@@ -344,6 +358,75 @@ class AgentToolRuntimeGovernance:
             runtime_layer=runtime_layer,
             decision=decision,
             input_fingerprint=input_fingerprint,
+        )
+
+
+    def finalize_with_consumed_approval(
+        self,
+        *,
+        gate: AgentToolRuntimeGate,
+        record: PolicyApprovalRecord,
+        expected_scope: AgentToolApprovalScope,
+    ) -> AgentToolRuntimeGate:
+        'Re-compose enforcement using only a consumed exact approval.'
+
+        if not isinstance(gate, AgentToolRuntimeGate):
+            raise AgentToolRuntimeGovernanceError(
+                "Trusted AgentToolRuntimeGate is required."
+            )
+
+        if gate.human_control_layer is not None:
+            raise AgentToolRuntimeGovernanceError(
+                "Human Control has already been applied to this gate."
+            )
+
+        if not isinstance(expected_scope, AgentToolApprovalScope):
+            raise AgentToolRuntimeGovernanceError(
+                "Trusted AgentToolApprovalScope is required."
+            )
+
+        try:
+            rebuilt_scope = AgentHumanApprovalContract.build_scope(
+                decision=gate.decision,
+                binding=gate.binding,
+                execution_id=expected_scope.execution_id,
+                input_fingerprint=gate.input_fingerprint,
+            )
+
+            if rebuilt_scope.fingerprint != expected_scope.fingerprint:
+                raise AgentHumanApprovalError(
+                    "Approval scope no longer matches the current gate."
+                )
+
+            human_control = (
+                AgentHumanApprovalContract.allow_decision(
+                    record=record,
+                    expected_scope=rebuilt_scope,
+                )
+            )
+
+            final_decision = self._enforcer.evaluate(
+                profile=gate.profile,
+                expected_profile_fingerprint=(
+                    gate.profile.fingerprint
+                ),
+                request=gate.request,
+                layer_decisions=(
+                    gate.registry_layer,
+                    gate.workspace_layer,
+                    gate.runtime_layer,
+                    human_control,
+                ),
+            )
+        except (AgentHumanApprovalError, ValueError) as exc:
+            raise AgentToolRuntimeGovernanceError(
+                "Human Control finalization failed closed."
+            ) from exc
+
+        return replace(
+            gate,
+            decision=final_decision,
+            human_control_layer=human_control,
         )
 
 
