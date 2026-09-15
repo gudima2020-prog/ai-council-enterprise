@@ -19,8 +19,14 @@ from backend.agent_governance.core import (
 )
 from backend.agent_governance.enforcement import (
     AgentBeforeToolExecutionDecision,
+    AgentEnforcementAction,
     AgentEnforcementLayerDecision,
     BeforeToolExecutionEnforcer,
+)
+from backend.agent_governance.invocation import (
+    AgentTrustedInvocationError,
+    TrustedAgentInvocationFacts,
+    TrustedAgentInvocationResolver,
 )
 from backend.agent_governance.enforcement_adapters import (
     AGENT_POLICY_ACTION_ID_METADATA_KEY,
@@ -44,7 +50,7 @@ from backend.services.workspace_policy import (
 
 
 AGENT_TOOL_RUNTIME_GOVERNANCE_SCHEMA_VERSION = (
-    "p3-002.2b-c1.runtime-gate"
+    "p3-002.2b-c3b.runtime-gate"
 )
 
 WorkspacePolicyResolver = Callable[
@@ -82,6 +88,7 @@ class AgentToolRuntimeGate:
     runtime_layer: AgentEnforcementLayerDecision
     decision: AgentBeforeToolExecutionDecision
     input_fingerprint: str
+    invocation_facts: TrustedAgentInvocationFacts | None = None
     human_control_layer: AgentEnforcementLayerDecision | None = None
 
     @property
@@ -116,6 +123,14 @@ class AgentToolRuntimeGate:
                 "fingerprint": self.binding.fingerprint,
             },
             "input_fingerprint": self.input_fingerprint,
+            "trusted_invocation": (
+                None
+                if self.invocation_facts is None
+                else {
+                    **self.invocation_facts.to_dict(),
+                    "fingerprint": self.invocation_facts.fingerprint,
+                }
+            ),
             "layers": [
                 {
                     "layer": item.layer.value,
@@ -148,6 +163,16 @@ class AgentToolRuntimeGate:
             "profile_fingerprint": self.profile.fingerprint,
             "binding_fingerprint": self.binding.fingerprint,
             "input_fingerprint": self.input_fingerprint,
+            "trusted_invocation_fingerprint": (
+                None
+                if self.invocation_facts is None
+                else self.invocation_facts.fingerprint
+            ),
+            "external_domain": (
+                None
+                if self.invocation_facts is None
+                else self.invocation_facts.external_domain
+            ),
             "decision_action": self.decision.action.value,
             "decision_fingerprint": self.decision.fingerprint,
             "approval_required": self.decision.approval_required,
@@ -167,9 +192,10 @@ class AgentToolRuntimeGovernance:
     must have a valid governed binding. Missing or inconsistent bindings
     fail closed.
 
-    P3-002.2b-C1 deliberately does not claim network-domain enforcement or
-    isolated code execution. Network tools and code-execution capabilities
-    therefore fail closed until those trusted runtime boundaries are wired.
+    P3-002.2b-C3b derives an exact audited destination for supported network
+    tools from canonical validated input. Network transport enforcement and
+    isolated code execution remain unavailable, so executable network/code
+    paths still fail closed until those runtime boundaries are wired.
     """
 
     def __init__(
@@ -181,6 +207,7 @@ class AgentToolRuntimeGovernance:
             workspace_policy_resolver
         )
         self._adapter = TrustedAgentEnforcementAdapter()
+        self._invocation_resolver = TrustedAgentInvocationResolver()
         self._enforcer = BeforeToolExecutionEnforcer()
 
     def evaluate(
@@ -192,6 +219,7 @@ class AgentToolRuntimeGovernance:
         workspace_id: str | None,
         agent_id: str | None,
         input_data: dict[str, Any],
+        validated_input: dict[str, Any] | None = None,
     ) -> AgentToolRuntimeGate | None:
         if not isinstance(tool, ToolDefinitionModel):
             raise AgentToolRuntimeGovernanceError(
@@ -204,6 +232,13 @@ class AgentToolRuntimeGovernance:
         if not isinstance(input_data, dict):
             raise AgentToolRuntimeGovernanceError(
                 "Tool input must be an object."
+            )
+        if (
+            validated_input is not None
+            and not isinstance(validated_input, dict)
+        ):
+            raise AgentToolRuntimeGovernanceError(
+                "Validated tool input must be an object."
             )
 
         metadata = tool.metadata_json or {}
@@ -269,14 +304,25 @@ class AgentToolRuntimeGovernance:
                 "Trusted Agent tool binding failed closed."
             ) from exc
 
+        invocation_facts: TrustedAgentInvocationFacts | None = None
         if (
             AgentCapability.EXTERNAL_NETWORK
             in binding.capabilities
         ):
-            raise AgentToolRuntimeBoundaryUnavailableError(
-                "Trusted network destination enforcement is "
-                "not wired in P3-002.2b-C1."
-            )
+            if validated_input is None:
+                raise AgentToolRuntimeBoundaryUnavailableError(
+                    "Trusted validated network input is required "
+                    "before destination derivation."
+                )
+            try:
+                invocation_facts = self._invocation_resolver.derive(
+                    binding=binding,
+                    validated_input=validated_input,
+                )
+            except AgentTrustedInvocationError as exc:
+                raise AgentToolRuntimeGovernanceError(
+                    "Trusted invocation derivation failed closed."
+                ) from exc
 
         secret_bindings = metadata.get(
             "secret_bindings",
@@ -304,6 +350,11 @@ class AgentToolRuntimeGovernance:
             request = self._adapter.build_request(
                 tool=tool,
                 workspace_policy=workspace_policy,
+                external_domain=(
+                    None
+                    if invocation_facts is None
+                    else invocation_facts.external_domain
+                ),
             )
             registry_layer = (
                 self._adapter.tool_registry_decision(
@@ -341,12 +392,23 @@ class AgentToolRuntimeGovernance:
                 ),
             )
             input_fingerprint = (
-                fingerprint_agent_tool_input(input_data)
+                invocation_facts.input_fingerprint
+                if invocation_facts is not None
+                else fingerprint_agent_tool_input(input_data)
             )
         except (AgentEnforcementAdapterError, ValueError) as exc:
             raise AgentToolRuntimeGovernanceError(
                 "Before Tool Execution evaluation failed closed."
             ) from exc
+
+        if (
+            invocation_facts is not None
+            and decision.action != AgentEnforcementAction.DENY
+        ):
+            raise AgentToolRuntimeBoundaryUnavailableError(
+                "Trusted network destination was derived, but "
+                "network transport enforcement is not wired."
+            )
 
         return AgentToolRuntimeGate(
             profile=selection.profile,
@@ -358,6 +420,7 @@ class AgentToolRuntimeGovernance:
             runtime_layer=runtime_layer,
             decision=decision,
             input_fingerprint=input_fingerprint,
+            invocation_facts=invocation_facts,
         )
 
 

@@ -612,6 +612,14 @@ class ToolExecutionRuntime:
                 and self._agent_governance is not None
             ):
                 try:
+                    validated_governance_input = (
+                        self._sandbox.validate_input(
+                            tool=tool,
+                            input_data=input_data,
+                        )
+                        if bool(tool.allow_network)
+                        else None
+                    )
                     agent_gate = self._agent_governance.evaluate(
                         session=session,
                         tool=tool,
@@ -619,6 +627,7 @@ class ToolExecutionRuntime:
                         workspace_id=workspace_id,
                         agent_id=agent_id,
                         input_data=input_data,
+                        validated_input=validated_governance_input,
                     )
                 except AgentToolRuntimeGovernanceError as exc:
                     governance_failure = True

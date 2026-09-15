@@ -5,6 +5,14 @@ from backend.agent_governance.runtime import (
     AgentToolRuntimeGovernance,
     AgentToolRuntimeGovernanceError,
 )
+from backend.agent_governance.invocation import (
+    AGENT_TRUSTED_INVOCATION_SCHEMA_VERSION,
+    AgentTrustedDestinationError,
+    AgentTrustedDestinationUnavailableError,
+    AgentTrustedInvocationError,
+    TrustedAgentInvocationFacts,
+    TrustedAgentInvocationResolver,
+)
 from backend.agent_governance.enforcement_adapters import (
     AGENT_ENFORCEMENT_ADAPTER_SCHEMA_VERSION,
     AGENT_POLICY_ACTION_ID_METADATA_KEY,
@@ -79,6 +87,12 @@ from backend.agent_governance.service import (
 
 
 __all__ = [
+    "AGENT_TRUSTED_INVOCATION_SCHEMA_VERSION",
+    "AgentTrustedDestinationError",
+    "AgentTrustedDestinationUnavailableError",
+    "AgentTrustedInvocationError",
+    "TrustedAgentInvocationFacts",
+    "TrustedAgentInvocationResolver",
     "AGENT_TOOL_RUNTIME_GOVERNANCE_SCHEMA_VERSION",
     "AgentToolRuntimeBoundaryUnavailableError",
     "AgentToolRuntimeGate",

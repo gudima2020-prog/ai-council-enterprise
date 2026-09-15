@@ -285,6 +285,8 @@ async def test_active_profile_allows_exact_governed_read() -> None:
     assert payload["input_fingerprint"] == (
         fingerprint_agent_tool_input({"value": 42})
     )
+    assert payload["trusted_invocation_fingerprint"] is None
+    assert payload["external_domain"] is None
 
     assert set(payload) == {
         "invocation_id",
@@ -295,6 +297,8 @@ async def test_active_profile_allows_exact_governed_read() -> None:
         "profile_fingerprint",
         "binding_fingerprint",
         "input_fingerprint",
+        "trusted_invocation_fingerprint",
+        "external_domain",
         "decision_action",
         "decision_fingerprint",
         "approval_required",
@@ -529,7 +533,10 @@ async def test_network_capability_fails_closed_before_handler() -> None:
             DirectToolExecutionRequest(
                 workspace_id=WORKSPACE_ID,
                 input={
-                    "url": "https://example.invalid/private-value"
+                    "url": (
+                        "https://github.com/repository/path"
+                        "?private-value=must-not-leak"
+                    )
                 },
             ),
         )
@@ -564,6 +571,145 @@ async def test_network_capability_fails_closed_before_handler() -> None:
     assert "url" not in payload
     assert "input" not in payload
     assert "private-value" not in payload
+
+
+@pytest.mark.asyncio
+async def test_network_destination_is_checked_by_exact_profile_domain() -> None:
+    scope = make_scope()
+    event_bus = EventBus()
+    failed_closed_events = []
+    enforcement_events = []
+
+    async def capture_failed(event):
+        failed_closed_events.append(event)
+
+    async def capture_enforcement(event):
+        enforcement_events.append(event)
+
+    event_bus.subscribe(
+        "agent.tool.enforcement.failed_closed",
+        capture_failed,
+    )
+    event_bus.subscribe(
+        "agent.tool.enforcement.evaluated",
+        capture_enforcement,
+    )
+
+    with scope() as session:
+        add_workspace(session)
+        select_profile(session, "research-readonly")
+
+        service = ToolRegistryService(
+            ToolRepository(session),
+            event_bus,
+        )
+
+        created = await service.create(
+            ToolCreate(
+                workspace_id=WORKSPACE_ID,
+                tool_key="governed.network.domain-check",
+                display_name="Governed network domain check",
+                handler_ref="builtin.echo",
+                kind="builtin",
+                risk_level="low",
+                allow_network=True,
+                input_schema={
+                    "type": "object",
+                    "required": ["url"],
+                    "properties": {
+                        "url": {"type": "string", "minLength": 1}
+                    },
+                    "additionalProperties": False,
+                },
+                output_schema={"type": "object"},
+                metadata={
+                    AGENT_POLICY_TOOL_ID_METADATA_KEY: "network.fetch",
+                    AGENT_POLICY_ACTION_ID_METADATA_KEY: "network.fetch",
+                    AGENT_POLICY_RUNTIME_OPERATION_METADATA_KEY: (
+                        PolicyOperation.METADATA_VALIDATION.value
+                    ),
+                },
+            )
+        )
+
+        await service.add_permission(
+            created["id"],
+            ToolPermissionCreate(
+                workspace_id=WORKSPACE_ID,
+                effect="allow",
+                created_by="operator1",
+            ),
+        )
+
+        tool_id = created["id"]
+
+    called = False
+    tool_runtime = runtime(scope, event_bus)
+
+    async def should_not_run(context):
+        nonlocal called
+        called = True
+        return {"unexpected": True}
+
+    tool_runtime.handlers.register(
+        "builtin.echo",
+        should_not_run,
+        replace=True,
+    )
+
+    secret_path = "/private/repository/path"
+    secret_query = "token=must-not-leak"
+
+    with pytest.raises(ToolPermissionDenied):
+        await tool_runtime.execute_direct(
+            tool_id,
+            DirectToolExecutionRequest(
+                workspace_id=WORKSPACE_ID,
+                input={
+                    "url": (
+                        "https://github.com.evil.example"
+                        f"{secret_path}?{secret_query}"
+                    )
+                },
+            ),
+        )
+
+    assert called is False
+    assert failed_closed_events == []
+
+    with scope() as session:
+        invocation = ToolRegistryService(
+            ToolRepository(session),
+            event_bus,
+        ).list_invocations()[0]
+
+    governance = invocation["policy"]["agent_governance"]
+    trusted = governance["trusted_invocation"]
+
+    assert invocation["status"] == "denied"
+    assert invocation["policy"]["execution_allowed"] is False
+    assert governance["decision"]["action"] == "deny"
+    assert (
+        "PROFILE_DOMAIN_NOT_ALLOWED"
+        in governance["decision"]["reason_codes"]
+    )
+    assert trusted["external_domain"] == "github.com.evil.example"
+    assert trusted["action_id"] == "network.fetch"
+    assert trusted["governed_tool_id"] == "network.fetch"
+    assert trusted["resolver_id"] == "network.fetch.https-url"
+
+    assert len(enforcement_events) == 1
+    event_payload = enforcement_events[0].payload
+    assert event_payload["external_domain"] == "github.com.evil.example"
+    assert event_payload["decision_action"] == "deny"
+
+    policy_text = str(invocation["policy"])
+    event_text = str(event_payload)
+
+    assert secret_path not in policy_text
+    assert secret_query not in policy_text
+    assert secret_path not in event_text
+    assert secret_query not in event_text
 
 
 @pytest.mark.asyncio
