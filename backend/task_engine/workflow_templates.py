@@ -19,6 +19,11 @@ from backend.task_engine.dependencies import (
     TaskDependencyType,
 )
 from backend.task_engine.enums import TaskPriority, TaskStatus, TaskType
+from backend.task_engine.governance_materialization import (
+    GOVERNANCE_PAYLOAD_KEY,
+    GovernanceMaterializationSpec,
+    TaskGovernanceMaterializer,
+)
 from backend.task_engine.models import (
     TaskModel,
     WorkflowInstanceModel,
@@ -118,9 +123,17 @@ class WorkflowTemplateService:
         TaskStatus.SKIPPED.value,
     }
 
-    def __init__(self, session: Session, event_bus: EventBus) -> None:
+    def __init__(
+        self,
+        session: Session,
+        event_bus: EventBus,
+        governance_materializer: TaskGovernanceMaterializer | None = None,
+    ) -> None:
         self.session = session
         self.event_bus = event_bus
+        self._governance_materializer = (
+            governance_materializer or TaskGovernanceMaterializer()
+        )
 
     async def create_template(self, request: WorkflowTemplateCreate) -> dict[str, Any]:
         definition = {
@@ -300,6 +313,52 @@ class WorkflowTemplateService:
     def get_instance(self, instance_id: str) -> dict[str, Any] | None:
         return self.refresh_instance(instance_id)
 
+    def materialize_governance(
+        self,
+        instance_id: str,
+        specifications: dict[str, GovernanceMaterializationSpec],
+    ) -> dict[str, Any] | None:
+        instance = self.session.get(WorkflowInstanceModel, instance_id)
+        if instance is None:
+            return None
+
+        node_task_map = dict(instance.node_task_map_json or {})
+        unknown_nodes = sorted(set(specifications) - set(node_task_map))
+        if unknown_nodes:
+            raise WorkflowTemplateError(
+                "Governance materialization references unknown workflow "
+                "nodes: " + ", ".join(unknown_nodes)
+            )
+
+        repository = TaskRepository(
+            self.session,
+            governance_materializer=self._governance_materializer,
+        )
+        materialized: dict[str, dict[str, Any]] = {}
+
+        for node_key in sorted(specifications):
+            task = self.session.get(TaskModel, node_task_map[node_key])
+            if task is None:
+                raise WorkflowTemplateError(
+                    f"Task for workflow node {node_key!r} not found."
+                )
+
+            envelope = repository.materialize_governance(
+                task,
+                specifications[node_key],
+            )
+            materialized[node_key] = {
+                "task_id": task.id,
+                "plan_fingerprint": envelope["plan_fingerprint"],
+                "authorization_state": envelope["authorization_state"],
+            }
+
+        self.session.flush()
+        return {
+            "instance_id": instance.id,
+            "materialized": materialized,
+        }
+
     def prepare_task(self, task_id: str) -> dict[str, Any]:
         task = self.session.get(TaskModel, task_id)
         if task is None:
@@ -429,6 +488,9 @@ class WorkflowTemplateService:
                     "approval": approval,
                 }
 
+        governance_meta = deepcopy(
+            (task.payload_json or {}).get(GOVERNANCE_PAYLOAD_KEY)
+        )
         base_payload = deepcopy(workflow_meta.get("base_payload", {}))
         mapped: dict[str, Any] = {}
         for target_path, source_path in dict(workflow_meta.get("result_mapping", {})).items():
@@ -437,6 +499,8 @@ class WorkflowTemplateService:
             mapped[target_path] = value
 
         base_payload["_workflow"] = workflow_meta
+        if governance_meta is not None:
+            base_payload[GOVERNANCE_PAYLOAD_KEY] = governance_meta
         task.payload_json = base_payload
         self.session.flush()
         return {
