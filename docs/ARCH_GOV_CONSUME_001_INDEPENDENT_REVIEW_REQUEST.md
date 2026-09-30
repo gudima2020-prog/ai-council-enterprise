@@ -50,6 +50,9 @@ Independently test or inspect, rather than merely trusting the focused tests:
 12. No caller-controlled consumer/provider hook can replace canonical recomputation inside TaskExecutor.
 13. No ActionGateway, ToolExecutionRuntime authorization, AgentRuntime, SkillRegistry, P3-002 or DB migration was introduced.
 14. Existing plain Task/Workflow behavior remains compatible.
+15. With `ParallelTaskExecutor` + `TaskAdmissionManager`, governance-invalid Tasks are rejected before normal admission reservation/quota consumption.
+16. If a reservation exists before governance rejection, `task.executor.governance_rejected` settles it to zero without charge.
+17. After a 2.5 USD governance-invalid Task under a 3.0 USD hard budget, a later valid 1.0 USD Task can still execute; the invalid Task must not remain in active budget commitment.
 
 ## Security questions
 
@@ -63,6 +66,7 @@ Explicitly answer:
 - Does `human_gate_required=True` itself block or approve execution in this slice? Explain why that behavior matches or violates the documented scope.
 - Can a plain Task execute without materialized governance in this slice? Explain why that is or is not a compatibility requirement.
 - Are run/log metadata descriptive evidence of consumption only, or could they accidentally be treated as authorization?
+- Can governance rejection leave an admission reservation, active budget commitment, or starvation condition for later valid Tasks?
 
 ## Output
 
