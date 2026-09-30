@@ -77,19 +77,12 @@ class UnsupportedTaskHandler(RuntimeError):
     pass
 
 
-class GovernanceClaimRejected(RuntimeError):
-    def __init__(
-        self,
-        *,
-        task_id: str,
-        workspace_id: str | None,
-        run_id: str,
-        message: str,
-    ) -> None:
-        super().__init__(message)
-        self.task_id = task_id
-        self.workspace_id = workspace_id
-        self.run_id = run_id
+@dataclass(frozen=True)
+class GovernanceClaimRejection:
+    task_id: str
+    workspace_id: str | None
+    run_id: str
+    message: str
 
 
 class TaskExecutor:
@@ -167,19 +160,19 @@ class TaskExecutor:
         }
 
     async def execute_queue_item(self, item: QueueItem) -> None:
-        try:
-            claimed = self._claim_task(item.task_id)
-        except GovernanceClaimRejected as exc:
+        claimed = self._claim_task(item.task_id)
+
+        if isinstance(claimed, GovernanceClaimRejection):
             self._failed += 1
             self._governance_rejected += 1
             await self._event_bus.publish(
                 Event(
                     event_type="task.executor.governance_rejected",
                     source="task_executor",
-                    workspace_id=exc.workspace_id,
+                    workspace_id=claimed.workspace_id,
                     payload={
-                        "task_id": exc.task_id,
-                        "run_id": exc.run_id,
+                        "task_id": claimed.task_id,
+                        "run_id": claimed.run_id,
                         "reason": "canonical_recomputation_failed",
                     },
                 )
@@ -584,7 +577,11 @@ class TaskExecutor:
     def _claim_task(
         self,
         task_id: str,
-    ) -> tuple[TaskExecutionContext, str] | None:
+    ) -> (
+        tuple[TaskExecutionContext, str]
+        | GovernanceClaimRejection
+        | None
+    ):
         with self._session_factory() as session:
             repository = TaskRepository(session)
             task = repository.get(task_id)
@@ -608,12 +605,12 @@ class TaskExecutor:
                     attempt=attempt,
                     exc=exc,
                 )
-                raise GovernanceClaimRejected(
+                return GovernanceClaimRejection(
                     task_id=task.id,
                     workspace_id=task.workspace_id,
                     run_id=run_id,
                     message=str(exc),
-                ) from exc
+                )
 
             TaskStateMachine.transition(task, TaskStatus.RUNNING)
 
