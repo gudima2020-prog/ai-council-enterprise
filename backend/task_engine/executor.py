@@ -571,6 +571,37 @@ class TaskExecutor:
                 )
             )
 
+    def _governance_preflight_is_valid(
+        self,
+        task_id: str,
+    ) -> bool | None:
+        """Check governance integrity without mutating Task execution state.
+
+        This is an advisory pre-admission optimization for executors that
+        reserve external resources before the authoritative claim. The
+        authoritative claim still recomputes governance again to close the
+        time-of-check/time-of-use gap.
+        """
+        with self._session_factory() as session:
+            repository = TaskRepository(session)
+            task = repository.get(task_id)
+
+            if task is None:
+                return None
+
+            if task.status not in {
+                TaskStatus.QUEUED.value,
+                TaskStatus.RETRYING.value,
+            }:
+                return None
+
+            try:
+                self._governance_consumer.consume(task)
+            except GovernanceConsumptionError:
+                return False
+
+            return True
+
     def _claim_task(
         self,
         task_id: str,
