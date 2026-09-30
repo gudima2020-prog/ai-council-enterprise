@@ -13,6 +13,12 @@ from backend.core.events import EventBus
 from backend.database.base import Base
 from backend.database import models  # noqa: F401
 from backend.task_engine import models as task_models  # noqa: F401
+from backend.task_engine.admission import TaskAdmissionManager
+from backend.task_engine.budget_schemas import (
+    BudgetEnforcementMode,
+    BudgetPeriod,
+    BudgetPolicyCreate,
+)
 from backend.task_engine.enums import TaskStatus, TaskType
 from backend.task_engine.executor import TaskExecutor
 from backend.task_engine.governance import (
@@ -388,3 +394,191 @@ async def test_parallel_executor_inherits_governance_consumption_boundary() -> N
     governance = seen["governance"]
     assert governance is not None
     assert governance.task_id == task_id
+
+@pytest.mark.asyncio
+async def test_parallel_governance_rejection_does_not_consume_admission_budget() -> None:
+    scope = make_scope()
+    event_bus = EventBus()
+    manager = TaskAdmissionManager(
+        event_bus=event_bus,
+        session_factory=scope,
+    )
+    event_bus.subscribe(
+        "task.executor.governance_rejected",
+        manager.handle_execution_event,
+    )
+
+    await manager.create_policy(
+        BudgetPolicyCreate(
+            name="Governance rejection budget",
+            period=BudgetPeriod.LIFETIME,
+            enforcement_mode=BudgetEnforcementMode.HARD,
+            limit_usd=3,
+        )
+    )
+
+    called = False
+    with scope() as session:
+        repository = TaskRepository(session)
+        task = repository.create(
+            TaskCreate(
+                task_type=TaskType.PLUGIN,
+                title="Invalid governed costed task",
+                payload={
+                    "value": "must-not-run",
+                    "_cost": {"estimated_usd": 2.5},
+                },
+                max_retries=3,
+            )
+        )
+        repository.materialize_governance(task, governance_spec())
+
+        payload = deepcopy(task.payload_json)
+        payload[GOVERNANCE_PAYLOAD_KEY][
+            "plan_fingerprint"
+        ] = "0" * 64
+        task.payload_json = payload
+        TaskStateMachine.transition(task, TaskStatus.QUEUED)
+        task_id = task.id
+
+    async def handler(context):
+        nonlocal called
+        called = True
+        return {"status": "unexpected"}
+
+    executor = ParallelTaskExecutor(
+        queue=TaskQueue(),
+        event_bus=event_bus,
+        session_factory=scope,
+        admission_manager=manager,
+    )
+    executor.register(TaskType.PLUGIN.value, handler)
+
+    await executor.execute_queue_item(queue_item(task_id))
+
+    assert called is False
+
+    with scope() as session:
+        full = TaskRepository(session).get_full(task_id)
+        assert full is not None
+        assert full.status == TaskStatus.FAILED.value
+        assert full.retry_count == 0
+
+    cost = manager.cost_status(task_id)
+    assert cost is not None
+    assert cost["reserved_usd"] == 0.0
+    assert cost["spent_usd"] == 0.0
+
+    usage = manager.budget_status()["usage"]
+    assert usage["reserved_usd"] == 0.0
+    assert usage["spent_usd"] == 0.0
+    assert usage["active"] == 0
+    assert usage["tasks_admitted"] == 0
+
+
+@pytest.mark.asyncio
+async def test_invalid_governance_cannot_starve_later_valid_task_budget() -> None:
+    scope = make_scope()
+    event_bus = EventBus()
+    manager = TaskAdmissionManager(
+        event_bus=event_bus,
+        session_factory=scope,
+    )
+    for event_type in (
+        "task.executor.completed",
+        "task.executor.failed",
+        "task.executor.timed_out",
+        "task.executor.governance_rejected",
+        "task.cancelled",
+    ):
+        event_bus.subscribe(
+            event_type,
+            manager.handle_execution_event,
+        )
+
+    await manager.create_policy(
+        BudgetPolicyCreate(
+            name="Hard three dollar budget",
+            period=BudgetPeriod.LIFETIME,
+            enforcement_mode=BudgetEnforcementMode.HARD,
+            limit_usd=3,
+        )
+    )
+
+    with scope() as session:
+        repository = TaskRepository(session)
+
+        invalid = repository.create(
+            TaskCreate(
+                task_type=TaskType.PLUGIN,
+                title="Invalid 2.5 USD task",
+                payload={
+                    "value": "invalid",
+                    "_cost": {"estimated_usd": 2.5},
+                },
+                max_retries=3,
+            )
+        )
+        repository.materialize_governance(
+            invalid,
+            governance_spec(revision_id="rev_invalid"),
+        )
+        invalid_payload = deepcopy(invalid.payload_json)
+        invalid_payload[GOVERNANCE_PAYLOAD_KEY][
+            "plan_fingerprint"
+        ] = "f" * 64
+        invalid.payload_json = invalid_payload
+        TaskStateMachine.transition(invalid, TaskStatus.QUEUED)
+        invalid_id = invalid.id
+
+        valid = repository.create(
+            TaskCreate(
+                task_type=TaskType.PLUGIN,
+                title="Valid 1 USD task",
+                payload={
+                    "value": "valid",
+                    "_cost": {"estimated_usd": 1.0},
+                },
+            )
+        )
+        repository.materialize_governance(
+            valid,
+            governance_spec(revision_id="rev_valid"),
+        )
+        TaskStateMachine.transition(valid, TaskStatus.QUEUED)
+        valid_id = valid.id
+
+    called: list[str] = []
+
+    async def handler(context):
+        called.append(context.task_id)
+        return {"status": "handled"}
+
+    executor = ParallelTaskExecutor(
+        queue=TaskQueue(),
+        event_bus=event_bus,
+        session_factory=scope,
+        admission_manager=manager,
+    )
+    executor.register(TaskType.PLUGIN.value, handler)
+
+    await executor.execute_queue_item(queue_item(invalid_id))
+    await executor.execute_queue_item(queue_item(valid_id))
+
+    assert called == [valid_id]
+
+    with scope() as session:
+        repository = TaskRepository(session)
+        invalid = repository.get(invalid_id)
+        valid = repository.get(valid_id)
+        assert invalid is not None
+        assert valid is not None
+        assert invalid.status == TaskStatus.FAILED.value
+        assert valid.status == TaskStatus.COMPLETED.value
+
+    usage = manager.budget_status()["usage"]
+    assert usage["reserved_usd"] == 0.0
+    assert usage["spent_usd"] == 1.0
+    assert usage["committed_usd"] == 1.0
+    assert usage["active"] == 0
+
