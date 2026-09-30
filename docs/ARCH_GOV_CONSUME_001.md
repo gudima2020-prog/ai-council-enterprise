@@ -75,6 +75,21 @@ The rejection is returned from the claim transaction rather than raised through 
 
 `ParallelTaskExecutor` inherits the same claim boundary through `TaskExecutor`.
 
+### Admission/budget ordering
+
+When `ParallelTaskExecutor` uses `TaskAdmissionManager`, governance integrity is
+preflighted before admission can reserve budget or consume admission quota. The
+preflight is intentionally advisory: the authoritative Task claim recomputes
+canonical governance again immediately before handler context creation, closing
+the time-of-check/time-of-use gap.
+
+A second defense remains event-driven. If a reservation nevertheless exists
+(for example because state changes between preflight and claim),
+`task.executor.governance_rejected` is treated as a terminal release event by
+`TaskAdmissionManager`, and production subscribes cost settlement to that
+event. Governance rejection therefore must not leave `reserved_usd` or an
+active budget commitment behind.
+
 ## Important non-enforcement semantics
 
 A canonically valid requirements object may say `human_gate_required=True`. That fact remains a requirement only. This slice does not inspect or consume a Human Approval record and does not convert that requirement into authorization.
