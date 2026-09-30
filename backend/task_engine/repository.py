@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.task_engine.enums import TaskStatus
+from backend.task_engine.governance_materialization import (
+    GOVERNANCE_PAYLOAD_KEY,
+    GovernanceMaterializationError,
+    GovernanceMaterializationSpec,
+    TaskGovernanceMaterializer,
+)
 from backend.task_engine.models import (
     TaskArtifactModel,
     TaskLogModel,
@@ -26,17 +33,32 @@ def utc_now() -> datetime:
 
 
 class TaskRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        governance_materializer: TaskGovernanceMaterializer | None = None,
+    ) -> None:
         self.session = session
+        self._governance_materializer = (
+            governance_materializer or TaskGovernanceMaterializer()
+        )
 
     def create(self, data: TaskCreate) -> TaskModel:
+        payload = deepcopy(data.payload)
+        if GOVERNANCE_PAYLOAD_KEY in payload:
+            raise GovernanceMaterializationError(
+                "The _governance payload key is reserved for canonical "
+                "materialization."
+            )
+
         row = TaskModel(
             workspace_id=data.workspace_id,
             task_type=data.task_type.value,
             priority=data.priority.value,
             title=data.title.strip(),
             description=data.description.strip(),
-            payload_json=data.payload,
+            payload_json=payload,
             creator=data.creator,
             executor=data.executor,
             max_retries=data.max_retries,
@@ -46,6 +68,26 @@ class TaskRepository:
         self.session.add(row)
         self.session.flush()
         return row
+
+    def materialize_governance(
+        self,
+        row: TaskModel,
+        spec: GovernanceMaterializationSpec,
+    ) -> dict[str, object]:
+        envelope = self._governance_materializer.materialize(row, spec)
+        self.session.flush()
+        return envelope
+
+    def validate_governance(
+        self,
+        row: TaskModel,
+    ) -> dict[str, object] | None:
+        if GOVERNANCE_PAYLOAD_KEY not in (row.payload_json or {}):
+            return None
+        return self._governance_materializer.validate(row)
+
+    def recompute_governance_plan(self, row: TaskModel):
+        return self._governance_materializer.recompute_plan(row)
 
     def get(self, task_id: str) -> TaskModel | None:
         return self.session.get(TaskModel, task_id)
@@ -121,7 +163,32 @@ class TaskRepository:
         if "priority" in values:
             row.priority = values["priority"].value
         if "payload" in values:
-            row.payload_json = values["payload"]
+            payload = deepcopy(values["payload"])
+            existing_governance = (row.payload_json or {}).get(
+                GOVERNANCE_PAYLOAD_KEY
+            )
+            incoming_governance = payload.get(GOVERNANCE_PAYLOAD_KEY)
+
+            if existing_governance is None:
+                if GOVERNANCE_PAYLOAD_KEY in payload:
+                    raise GovernanceMaterializationError(
+                        "The _governance payload key cannot be injected "
+                        "through a generic Task update."
+                    )
+            else:
+                if (
+                    GOVERNANCE_PAYLOAD_KEY in payload
+                    and incoming_governance != existing_governance
+                ):
+                    raise GovernanceMaterializationError(
+                        "Materialized governance cannot be changed through "
+                        "a generic Task update."
+                    )
+                payload[GOVERNANCE_PAYLOAD_KEY] = deepcopy(
+                    existing_governance
+                )
+
+            row.payload_json = payload
         if "result" in values:
             row.result_json = values["result"]
         if "executor" in values:

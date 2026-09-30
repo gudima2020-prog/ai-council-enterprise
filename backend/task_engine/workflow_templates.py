@@ -19,6 +19,11 @@ from backend.task_engine.dependencies import (
     TaskDependencyType,
 )
 from backend.task_engine.enums import TaskPriority, TaskStatus, TaskType
+from backend.task_engine.governance_materialization import (
+    GOVERNANCE_PAYLOAD_KEY,
+    GovernanceMaterializationSpec,
+    TaskGovernanceMaterializer,
+)
 from backend.task_engine.models import (
     TaskModel,
     WorkflowInstanceModel,
@@ -118,9 +123,17 @@ class WorkflowTemplateService:
         TaskStatus.SKIPPED.value,
     }
 
-    def __init__(self, session: Session, event_bus: EventBus) -> None:
+    def __init__(
+        self,
+        session: Session,
+        event_bus: EventBus,
+        governance_materializer: TaskGovernanceMaterializer | None = None,
+    ) -> None:
         self.session = session
         self.event_bus = event_bus
+        self._governance_materializer = (
+            governance_materializer or TaskGovernanceMaterializer()
+        )
 
     async def create_template(self, request: WorkflowTemplateCreate) -> dict[str, Any]:
         definition = {
@@ -300,6 +313,69 @@ class WorkflowTemplateService:
     def get_instance(self, instance_id: str) -> dict[str, Any] | None:
         return self.refresh_instance(instance_id)
 
+    def materialize_governance(
+        self,
+        instance_id: str,
+        specifications: dict[str, GovernanceMaterializationSpec],
+    ) -> dict[str, Any] | None:
+        instance = self.session.get(WorkflowInstanceModel, instance_id)
+        if instance is None:
+            return None
+
+        node_task_map = dict(instance.node_task_map_json or {})
+        unknown_nodes = sorted(set(specifications) - set(node_task_map))
+        if unknown_nodes:
+            raise WorkflowTemplateError(
+                "Governance materialization references unknown workflow "
+                "nodes: " + ", ".join(unknown_nodes)
+            )
+
+        repository = TaskRepository(
+            self.session,
+            governance_materializer=self._governance_materializer,
+        )
+        materialized: dict[str, dict[str, Any]] = {}
+
+        for node_key in sorted(specifications):
+            task = self.session.get(TaskModel, node_task_map[node_key])
+            if task is None:
+                raise WorkflowTemplateError(
+                    f"Task for workflow node {node_key!r} not found."
+                )
+
+            workflow_meta = (task.payload_json or {}).get("_workflow")
+            if not isinstance(workflow_meta, dict):
+                raise WorkflowTemplateError(
+                    f"Task for workflow node {node_key!r} has no valid "
+                    "workflow binding."
+                )
+
+            if (
+                workflow_meta.get("instance_id") != instance.id
+                or workflow_meta.get("template_id") != instance.template_id
+                or workflow_meta.get("node_key") != node_key
+            ):
+                raise WorkflowTemplateError(
+                    f"Task for workflow node {node_key!r} has an "
+                    "inconsistent workflow instance/node binding."
+                )
+
+            envelope = repository.materialize_governance(
+                task,
+                specifications[node_key],
+            )
+            materialized[node_key] = {
+                "task_id": task.id,
+                "plan_fingerprint": envelope["plan_fingerprint"],
+                "authorization_state": envelope["authorization_state"],
+            }
+
+        self.session.flush()
+        return {
+            "instance_id": instance.id,
+            "materialized": materialized,
+        }
+
     def prepare_task(self, task_id: str) -> dict[str, Any]:
         task = self.session.get(TaskModel, task_id)
         if task is None:
@@ -429,14 +505,22 @@ class WorkflowTemplateService:
                     "approval": approval,
                 }
 
+        governance_meta = deepcopy(
+            (task.payload_json or {}).get(GOVERNANCE_PAYLOAD_KEY)
+        )
         base_payload = deepcopy(workflow_meta.get("base_payload", {}))
         mapped: dict[str, Any] = {}
-        for target_path, source_path in dict(workflow_meta.get("result_mapping", {})).items():
+        for target_path, source_path in dict(
+            workflow_meta.get("result_mapping", {})
+        ).items():
+            self._validate_result_mapping_target(target_path)
             value = self._read_path(context, source_path)
             self._write_path(base_payload, target_path, deepcopy(value))
             mapped[target_path] = value
 
         base_payload["_workflow"] = workflow_meta
+        if governance_meta is not None:
+            base_payload[GOVERNANCE_PAYLOAD_KEY] = governance_meta
         task.payload_json = base_payload
         self.session.flush()
         return {
@@ -504,8 +588,16 @@ class WorkflowTemplateService:
             except WorkflowConditionError as exc:
                 errors.append(f"Node {node.key}: {exc}")
             for target, source in node.result_mapping.items():
-                if not target.strip() or not source.startswith(("input.", "nodes.")):
-                    errors.append(f"Node {node.key}: invalid result mapping {target} <- {source}.")
+                try:
+                    self._validate_result_mapping_target(target)
+                except WorkflowTemplateError as exc:
+                    errors.append(f"Node {node.key}: {exc}")
+                    continue
+                if not source.startswith(("input.", "nodes.")):
+                    errors.append(
+                        f"Node {node.key}: invalid result mapping "
+                        f"{target} <- {source}."
+                    )
 
         for edge in edges:
             if edge.from_node not in key_set or edge.to_node not in key_set:
@@ -655,10 +747,33 @@ class WorkflowTemplateService:
         return current
 
     @staticmethod
-    def _write_path(data: dict[str, Any], path: str, value: Any) -> None:
+    def _validate_result_mapping_target(path: str) -> None:
+        if not isinstance(path, str):
+            raise WorkflowTemplateError(
+                "Result mapping target path must be a string."
+            )
+
         parts = [part for part in path.split(".") if part]
         if not parts:
-            raise WorkflowTemplateError("Result mapping target path is empty.")
+            raise WorkflowTemplateError(
+                "Result mapping target path is empty."
+            )
+
+        if parts[0] == GOVERNANCE_PAYLOAD_KEY:
+            raise WorkflowTemplateError(
+                "Result mapping target cannot write reserved "
+                f"{GOVERNANCE_PAYLOAD_KEY} metadata."
+            )
+
+    @classmethod
+    def _write_path(
+        cls,
+        data: dict[str, Any],
+        path: str,
+        value: Any,
+    ) -> None:
+        cls._validate_result_mapping_target(path)
+        parts = [part for part in path.split(".") if part]
         current = data
         for part in parts[:-1]:
             next_value = current.get(part)
