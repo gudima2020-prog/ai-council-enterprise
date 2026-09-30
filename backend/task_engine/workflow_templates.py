@@ -343,6 +343,23 @@ class WorkflowTemplateService:
                     f"Task for workflow node {node_key!r} not found."
                 )
 
+            workflow_meta = (task.payload_json or {}).get("_workflow")
+            if not isinstance(workflow_meta, dict):
+                raise WorkflowTemplateError(
+                    f"Task for workflow node {node_key!r} has no valid "
+                    "workflow binding."
+                )
+
+            if (
+                workflow_meta.get("instance_id") != instance.id
+                or workflow_meta.get("template_id") != instance.template_id
+                or workflow_meta.get("node_key") != node_key
+            ):
+                raise WorkflowTemplateError(
+                    f"Task for workflow node {node_key!r} has an "
+                    "inconsistent workflow instance/node binding."
+                )
+
             envelope = repository.materialize_governance(
                 task,
                 specifications[node_key],
@@ -493,7 +510,10 @@ class WorkflowTemplateService:
         )
         base_payload = deepcopy(workflow_meta.get("base_payload", {}))
         mapped: dict[str, Any] = {}
-        for target_path, source_path in dict(workflow_meta.get("result_mapping", {})).items():
+        for target_path, source_path in dict(
+            workflow_meta.get("result_mapping", {})
+        ).items():
+            self._validate_result_mapping_target(target_path)
             value = self._read_path(context, source_path)
             self._write_path(base_payload, target_path, deepcopy(value))
             mapped[target_path] = value
@@ -568,8 +588,16 @@ class WorkflowTemplateService:
             except WorkflowConditionError as exc:
                 errors.append(f"Node {node.key}: {exc}")
             for target, source in node.result_mapping.items():
-                if not target.strip() or not source.startswith(("input.", "nodes.")):
-                    errors.append(f"Node {node.key}: invalid result mapping {target} <- {source}.")
+                try:
+                    self._validate_result_mapping_target(target)
+                except WorkflowTemplateError as exc:
+                    errors.append(f"Node {node.key}: {exc}")
+                    continue
+                if not source.startswith(("input.", "nodes.")):
+                    errors.append(
+                        f"Node {node.key}: invalid result mapping "
+                        f"{target} <- {source}."
+                    )
 
         for edge in edges:
             if edge.from_node not in key_set or edge.to_node not in key_set:
@@ -719,10 +747,33 @@ class WorkflowTemplateService:
         return current
 
     @staticmethod
-    def _write_path(data: dict[str, Any], path: str, value: Any) -> None:
+    def _validate_result_mapping_target(path: str) -> None:
+        if not isinstance(path, str):
+            raise WorkflowTemplateError(
+                "Result mapping target path must be a string."
+            )
+
         parts = [part for part in path.split(".") if part]
         if not parts:
-            raise WorkflowTemplateError("Result mapping target path is empty.")
+            raise WorkflowTemplateError(
+                "Result mapping target path is empty."
+            )
+
+        if parts[0] == GOVERNANCE_PAYLOAD_KEY:
+            raise WorkflowTemplateError(
+                "Result mapping target cannot write reserved "
+                f"{GOVERNANCE_PAYLOAD_KEY} metadata."
+            )
+
+    @classmethod
+    def _write_path(
+        cls,
+        data: dict[str, Any],
+        path: str,
+        value: Any,
+    ) -> None:
+        cls._validate_result_mapping_target(path)
+        parts = [part for part in path.split(".") if part]
         current = data
         for part in parts[:-1]:
             next_value = current.get(part)
