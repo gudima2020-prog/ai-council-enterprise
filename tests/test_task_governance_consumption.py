@@ -581,4 +581,3 @@ async def test_invalid_governance_cannot_starve_later_valid_task_budget() -> Non
     assert usage["spent_usd"] == 1.0
     assert usage["committed_usd"] == 1.0
     assert usage["active"] == 0
-
