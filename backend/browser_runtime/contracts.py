@@ -14,7 +14,6 @@ from backend.task_engine.governance import ExecutionInitiator
 
 
 BROWSER_CONTRACT_SCHEMA_VERSION = "arch-browser-contract-001.v1"
-
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]*$")
 
@@ -83,9 +82,8 @@ class EvidencePrivacyClass(StrEnum):
 
 
 def canonical_json(value: Any) -> str:
-    normalized = _normalize_json(value)
     return json.dumps(
-        normalized,
+        _normalize_json(value),
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
@@ -93,15 +91,8 @@ def canonical_json(value: Any) -> str:
 
 
 def fingerprint_payload(domain: str, value: Any) -> str:
-    domain_token = _normalize_token(
-        domain,
-        field_name="fingerprint_domain",
-    )
-    material = (
-        domain_token.encode("utf-8")
-        + b"\x00"
-        + canonical_json(value).encode("utf-8")
-    )
+    domain_token = _token(domain, "fingerprint_domain")
+    material = domain_token.encode() + b"\0" + canonical_json(value).encode()
     return hashlib.sha256(material).hexdigest()
 
 
@@ -120,309 +111,143 @@ def _normalize_json(value: Any) -> Any:
         return value
     if isinstance(value, float):
         if value != value or value in {float("inf"), float("-inf")}:
-            raise BrowserContractError(
-                "Non-finite JSON numbers are not allowed."
-            )
+            raise BrowserContractError("Non-finite JSON numbers are not allowed.")
         return value
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, datetime):
-        return _normalize_datetime(
-            value,
-            field_name="datetime",
-        ).isoformat()
+        return _dt(value, "datetime").isoformat()
     if isinstance(value, dict):
         if any(not isinstance(key, str) for key in value):
-            raise BrowserContractError(
-                "Canonical JSON object keys must be strings."
-            )
-        return {
-            key: _normalize_json(value[key])
-            for key in sorted(value)
-        }
+            raise BrowserContractError("Canonical JSON object keys must be strings.")
+        return {key: _normalize_json(value[key]) for key in sorted(value)}
     if isinstance(value, (list, tuple)):
         return [_normalize_json(item) for item in value]
     raise BrowserContractError(
-        "Unsupported canonical JSON value type: "
-        f"{type(value).__name__}."
+        f"Unsupported canonical JSON value type: {type(value).__name__}."
     )
 
 
-def _normalize_schema(value: str) -> str:
+def _schema(value: str) -> str:
     if value != BROWSER_CONTRACT_SCHEMA_VERSION:
-        raise BrowserContractError(
-            f"Unsupported schema_version: {value!r}."
-        )
+        raise BrowserContractError(f"Unsupported schema_version: {value!r}.")
     return value
 
 
-def _normalize_token(
-    value: str,
-    *,
-    field_name: str,
-    max_length: int = 128,
-) -> str:
+def _token(value: str, field_name: str, max_length: int = 128) -> str:
     if not isinstance(value, str):
-        raise BrowserContractError(
-            f"{field_name} must be a string."
-        )
+        raise BrowserContractError(f"{field_name} must be a string.")
     normalized = value.strip().lower()
     if (
         not normalized
         or len(normalized) > max_length
         or not _TOKEN_RE.fullmatch(normalized)
     ):
-        raise BrowserContractError(
-            f"Invalid {field_name}: {value!r}."
-        )
+        raise BrowserContractError(f"Invalid {field_name}: {value!r}.")
     return normalized
 
 
-def _normalize_optional_token(
-    value: str | None,
-    *,
-    field_name: str,
-    max_length: int = 128,
-) -> str | None:
-    if value is None:
-        return None
-    return _normalize_token(
-        value,
-        field_name=field_name,
-        max_length=max_length,
-    )
+def _optional_token(value: str | None, field_name: str) -> str | None:
+    return None if value is None else _token(value, field_name)
 
 
-def _normalize_sha256(
-    value: str,
-    *,
-    field_name: str,
-) -> str:
-    if (
-        not isinstance(value, str)
-        or not _SHA256_RE.fullmatch(value.strip())
-    ):
+def _sha(value: str, field_name: str) -> str:
+    if not isinstance(value, str) or not _SHA256_RE.fullmatch(value.strip()):
         raise BrowserContractError(
-            f"{field_name} must be a 64-character "
-            "SHA-256 hex digest."
+            f"{field_name} must be a 64-character SHA-256 hex digest."
         )
     return value.strip().lower()
 
 
-def _normalize_tokens(
-    values: Iterable[str],
-    *,
-    field_name: str,
-) -> tuple[str, ...]:
+def _tokens(values: Iterable[str], field_name: str) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
-        raise BrowserContractError(
-            f"{field_name} must be an array."
-        )
-    return tuple(
-        sorted(
-            {
-                _normalize_token(
-                    item,
-                    field_name=field_name,
-                )
-                for item in values
-            }
-        )
-    )
+        raise BrowserContractError(f"{field_name} must be an array.")
+    return tuple(sorted({_token(item, field_name) for item in values}))
 
 
-def _normalize_enum(
-    value: Any,
-    enum_type: type[StrEnum],
-    *,
-    field_name: str,
-) -> Any:
+def _enum(value: Any, enum_type: type[StrEnum], field_name: str) -> Any:
     if isinstance(value, enum_type):
         return value
     if not isinstance(value, str):
-        raise BrowserContractError(
-            f"Unsupported {field_name}: {value!r}."
-        )
+        raise BrowserContractError(f"Unsupported {field_name}: {value!r}.")
     try:
         return enum_type(value.strip().lower())
     except ValueError as exc:
-        raise BrowserContractError(
-            f"Unsupported {field_name}: {value!r}."
-        ) from exc
+        raise BrowserContractError(f"Unsupported {field_name}: {value!r}.") from exc
 
 
-def _normalize_enum_tuple(
+def _enums(
     values: Iterable[Any],
     enum_type: type[StrEnum],
-    *,
     field_name: str,
 ) -> tuple[Any, ...]:
     if isinstance(values, (str, bytes)):
-        raise BrowserContractError(
-            f"{field_name} must be an array."
-        )
-    normalized = {
-        _normalize_enum(
-            item,
-            enum_type,
-            field_name=field_name,
-        )
-        for item in values
-    }
-    return tuple(
-        item
-        for item in enum_type
-        if item in normalized
-    )
+        raise BrowserContractError(f"{field_name} must be an array.")
+    selected = {_enum(item, enum_type, field_name) for item in values}
+    return tuple(item for item in enum_type if item in selected)
 
 
-def _normalize_datetime(
-    value: datetime,
-    *,
-    field_name: str,
-) -> datetime:
+def _dt(value: datetime, field_name: str) -> datetime:
     if not isinstance(value, datetime):
-        raise BrowserContractError(
-            f"{field_name} must be a datetime."
-        )
+        raise BrowserContractError(f"{field_name} must be a datetime.")
     if value.tzinfo is None or value.utcoffset() is None:
-        raise BrowserContractError(
-            f"{field_name} must be timezone-aware."
-        )
+        raise BrowserContractError(f"{field_name} must be timezone-aware.")
     return value.astimezone(timezone.utc)
 
 
-def _normalize_origin(value: str) -> str:
-    if not isinstance(value, str):
+def _origin(value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise BrowserContractError("navigation origin must be a non-empty string.")
+    parsed = urlsplit(value.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise BrowserContractError("navigation origin must be an http(s) origin.")
+    if parsed.username is not None or parsed.password is not None:
+        raise BrowserContractError("navigation origin cannot contain credentials.")
+    if parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
         raise BrowserContractError(
-            "navigation origin must be a string."
+            "navigation origin cannot contain path, query, or fragment."
         )
-    raw = value.strip()
-    if not raw:
-        raise BrowserContractError(
-            "navigation origin cannot be empty."
-        )
-
-    parsed = urlsplit(raw)
-    if parsed.scheme not in {"http", "https"}:
-        raise BrowserContractError(
-            "navigation origin must use http or https."
-        )
-    if not parsed.hostname:
-        raise BrowserContractError(
-            "navigation origin requires a hostname."
-        )
-    if (
-        parsed.username is not None
-        or parsed.password is not None
-    ):
-        raise BrowserContractError(
-            "navigation origin cannot contain credentials."
-        )
-    if parsed.query or parsed.fragment:
-        raise BrowserContractError(
-            "navigation origin cannot contain query or fragment."
-        )
-    if parsed.path not in {"", "/"}:
-        raise BrowserContractError(
-            "navigation origin must not contain a path."
-        )
-
-    host = parsed.hostname.lower()
     try:
         port = parsed.port
     except ValueError as exc:
-        raise BrowserContractError(
-            "Invalid navigation origin port."
-        ) from exc
-
+        raise BrowserContractError("Invalid navigation origin port.") from exc
+    host = parsed.hostname.lower()
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
-
-    default_port = (
-        443 if parsed.scheme == "https" else 80
-    )
-    suffix = (
-        ""
-        if port in {None, default_port}
-        else f":{port}"
-    )
+    default_port = 443 if parsed.scheme == "https" else 80
+    suffix = "" if port in {None, default_port} else f":{port}"
     return f"{parsed.scheme}://{host}{suffix}"
 
 
-def _normalize_origins(
-    values: Iterable[str],
-) -> tuple[str, ...]:
+def _origins(values: Iterable[str]) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
-        raise BrowserContractError(
-            "requested_navigation_origins must be an array."
-        )
-    return tuple(
-        sorted({_normalize_origin(item) for item in values})
-    )
+        raise BrowserContractError("requested_navigation_origins must be an array.")
+    return tuple(sorted({_origin(item) for item in values}))
 
 
-def _normalize_relative_path(value: str) -> str:
+def _relative_path(value: str) -> str:
     if not isinstance(value, str):
-        raise BrowserContractError(
-            "Evidence path must be a string."
-        )
-
+        raise BrowserContractError("Evidence path must be a string.")
     normalized = value.strip().replace("\\", "/")
-    if not normalized or "\x00" in normalized:
-        raise BrowserContractError(
-            "Evidence path cannot be empty."
-        )
-    if normalized.startswith("/"):
-        raise BrowserContractError(
-            "Evidence path must be relative."
-        )
-    if re.match(r"^[A-Za-z]:", normalized):
-        raise BrowserContractError(
-            "Windows drive paths are not allowed."
-        )
-    if ":" in normalized:
-        raise BrowserContractError(
-            "Colon is not allowed in evidence paths."
-        )
-
+    if not normalized or "\0" in normalized or normalized.startswith("/"):
+        raise BrowserContractError("Evidence path must be a non-empty relative path.")
+    if re.match(r"^[A-Za-z]:", normalized) or ":" in normalized:
+        raise BrowserContractError("Windows drive/ADS forms are not allowed.")
     parts = normalized.split("/")
-    if any(
-        part in {"", ".", ".."}
-        for part in parts
-    ):
-        raise BrowserContractError(
-            "Evidence path must be canonical "
-            "and traversal-free."
-        )
-
+    if any(part in {"", ".", ".."} for part in parts):
+        raise BrowserContractError("Evidence path must be canonical and traversal-free.")
     path = PurePosixPath(*parts)
     if path.is_absolute():
-        raise BrowserContractError(
-            "Evidence path must be relative."
-        )
+        raise BrowserContractError("Evidence path must be relative.")
     return path.as_posix()
 
 
-def _normalize_safe_text(
-    value: str,
-    *,
-    field_name: str,
-    max_length: int = 128,
-) -> str:
+def _safe_text(value: str, field_name: str, max_length: int = 128) -> str:
     if not isinstance(value, str):
-        raise BrowserContractError(
-            f"{field_name} must be a string."
-        )
+        raise BrowserContractError(f"{field_name} must be a string.")
     normalized = value.strip()
-    if (
-        not normalized
-        or len(normalized) > max_length
-        or "\x00" in normalized
-    ):
-        raise BrowserContractError(
-            f"Invalid {field_name}."
-        )
+    if not normalized or len(normalized) > max_length or "\0" in normalized:
+        raise BrowserContractError(f"Invalid {field_name}.")
     return normalized
 
 
@@ -434,38 +259,18 @@ class BrowserProvenanceRef:
     source_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "source_kind",
-            _normalize_token(
-                self.source_kind,
-                field_name="source_kind",
-            ),
-        )
-        object.__setattr__(
-            self,
-            "source_id",
-            _normalize_token(
-                self.source_id,
-                field_name="source_id",
-            ),
-        )
+        object.__setattr__(self, "source_kind", _token(self.source_kind, "source_kind"))
+        object.__setattr__(self, "source_id", _token(self.source_id, "source_id"))
         object.__setattr__(
             self,
             "source_revision",
-            _normalize_optional_token(
-                self.source_revision,
-                field_name="source_revision",
-            ),
+            _optional_token(self.source_revision, "source_revision"),
         )
         if self.source_fingerprint is not None:
             object.__setattr__(
                 self,
                 "source_fingerprint",
-                _normalize_sha256(
-                    self.source_fingerprint,
-                    field_name="source_fingerprint",
-                ),
+                _sha(self.source_fingerprint, "source_fingerprint"),
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -486,67 +291,27 @@ class BrowserScriptArtifact:
         BrowserScriptRuntimeKind.PYTHON_PLAYWRIGHT
     )
     entrypoint: str | None = None
-    provenance: tuple[BrowserProvenanceRef, ...] = field(
-        default_factory=tuple
-    )
+    provenance: tuple[BrowserProvenanceRef, ...] = field(default_factory=tuple)
     schema_version: str = BROWSER_CONTRACT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        _normalize_schema(self.schema_version)
-
+        _schema(self.schema_version)
+        object.__setattr__(self, "artifact_id", _token(self.artifact_id, "artifact_id"))
+        object.__setattr__(self, "revision_id", _token(self.revision_id, "revision_id"))
         object.__setattr__(
-            self,
-            "artifact_id",
-            _normalize_token(
-                self.artifact_id,
-                field_name="artifact_id",
-            ),
-        )
-        object.__setattr__(
-            self,
-            "revision_id",
-            _normalize_token(
-                self.revision_id,
-                field_name="revision_id",
-            ),
-        )
-        object.__setattr__(
-            self,
-            "source_sha256",
-            _normalize_sha256(
-                self.source_sha256,
-                field_name="source_sha256",
-            ),
+            self, "source_sha256", _sha(self.source_sha256, "source_sha256")
         )
         object.__setattr__(
             self,
             "runtime_kind",
-            _normalize_enum(
-                self.runtime_kind,
-                BrowserScriptRuntimeKind,
-                field_name="runtime_kind",
-            ),
+            _enum(self.runtime_kind, BrowserScriptRuntimeKind, "runtime_kind"),
         )
         if self.entrypoint is not None:
-            object.__setattr__(
-                self,
-                "entrypoint",
-                _normalize_relative_path(
-                    self.entrypoint
-                ),
-            )
-
+            object.__setattr__(self, "entrypoint", _relative_path(self.entrypoint))
         provenance = tuple(self.provenance)
-        if any(
-            not isinstance(
-                item,
-                BrowserProvenanceRef,
-            )
-            for item in provenance
-        ):
+        if any(not isinstance(item, BrowserProvenanceRef) for item in provenance):
             raise BrowserContractError(
-                "provenance must contain "
-                "BrowserProvenanceRef items."
+                "provenance must contain BrowserProvenanceRef items."
             )
         object.__setattr__(
             self,
@@ -564,7 +329,7 @@ class BrowserScriptArtifact:
             ),
         )
 
-    def _payload_dict(self) -> dict[str, Any]:
+    def _payload(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "artifact_id": self.artifact_id,
@@ -572,177 +337,96 @@ class BrowserScriptArtifact:
             "runtime_kind": self.runtime_kind.value,
             "source_sha256": self.source_sha256,
             "entrypoint": self.entrypoint,
-            "provenance": [
-                item.to_dict()
-                for item in self.provenance
-            ],
+            "provenance": [item.to_dict() for item in self.provenance],
         }
 
     @property
     def fingerprint(self) -> str:
-        return fingerprint_payload(
-            "browser-script-artifact-v1",
-            self._payload_dict(),
-        )
+        return fingerprint_payload("browser-script-artifact-v1", self._payload())
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            **self._payload_dict(),
-            "fingerprint": self.fingerprint,
-        }
+        return {**self._payload(), "fingerprint": self.fingerprint}
 
 
 @dataclass(frozen=True)
 class BrowserRuntimeRequirements:
     ephemeral_runtime_required: bool = True
     fresh_browser_session_required: bool = True
-    browser_engine: BrowserEngine | str = (
-        BrowserEngine.CHROMIUM
-    )
-    filesystem_mode: BrowserFilesystemMode | str = (
-        BrowserFilesystemMode.WORKSPACE_ONLY
-    )
-    network_mode: BrowserNetworkMode | str = (
-        BrowserNetworkMode.NONE
-    )
-    download_policy: BrowserDownloadPolicy | str = (
-        BrowserDownloadPolicy.DENY
-    )
+    browser_engine: BrowserEngine | str = BrowserEngine.CHROMIUM
+    filesystem_mode: BrowserFilesystemMode | str = BrowserFilesystemMode.WORKSPACE_ONLY
+    network_mode: BrowserNetworkMode | str = BrowserNetworkMode.NONE
+    download_policy: BrowserDownloadPolicy | str = BrowserDownloadPolicy.DENY
     max_runtime_seconds: int = 120
     max_memory_mb: int = 1024
     max_pids: int = 128
     capture_screenshots: bool = True
-    credential_scopes: tuple[str, ...] = field(
-        default_factory=tuple
-    )
+    credential_scopes: tuple[str, ...] = field(default_factory=tuple)
     schema_version: str = BROWSER_CONTRACT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        _normalize_schema(self.schema_version)
-
+        _schema(self.schema_version)
         if self.ephemeral_runtime_required is not True:
-            raise BrowserContractError(
-                "Browser runtime must be ephemeral "
-                "in this contract."
-            )
+            raise BrowserContractError("Browser runtime must be ephemeral.")
         if self.fresh_browser_session_required is not True:
-            raise BrowserContractError(
-                "Browser execution must require "
-                "a fresh browser session."
-            )
-
+            raise BrowserContractError("Browser execution requires a fresh session.")
         object.__setattr__(
             self,
             "browser_engine",
-            _normalize_enum(
-                self.browser_engine,
-                BrowserEngine,
-                field_name="browser_engine",
-            ),
+            _enum(self.browser_engine, BrowserEngine, "browser_engine"),
         )
         object.__setattr__(
             self,
             "filesystem_mode",
-            _normalize_enum(
-                self.filesystem_mode,
-                BrowserFilesystemMode,
-                field_name="filesystem_mode",
-            ),
+            _enum(self.filesystem_mode, BrowserFilesystemMode, "filesystem_mode"),
         )
         object.__setattr__(
             self,
             "network_mode",
-            _normalize_enum(
-                self.network_mode,
-                BrowserNetworkMode,
-                field_name="network_mode",
-            ),
+            _enum(self.network_mode, BrowserNetworkMode, "network_mode"),
         )
         object.__setattr__(
             self,
             "download_policy",
-            _normalize_enum(
-                self.download_policy,
-                BrowserDownloadPolicy,
-                field_name="download_policy",
-            ),
+            _enum(self.download_policy, BrowserDownloadPolicy, "download_policy"),
         )
-
         if (
-            not isinstance(
-                self.max_runtime_seconds,
-                int,
-            )
-            or isinstance(
-                self.max_runtime_seconds,
-                bool,
-            )
-            or not 1
-            <= self.max_runtime_seconds
-            <= 3600
+            not isinstance(self.max_runtime_seconds, int)
+            or isinstance(self.max_runtime_seconds, bool)
+            or not 1 <= self.max_runtime_seconds <= 3600
         ):
-            raise BrowserContractError(
-                "max_runtime_seconds must be "
-                "between 1 and 3600."
-            )
+            raise BrowserContractError("max_runtime_seconds must be 1..3600.")
         if (
             not isinstance(self.max_memory_mb, int)
             or isinstance(self.max_memory_mb, bool)
-            or not 128
-            <= self.max_memory_mb
-            <= 16384
+            or not 128 <= self.max_memory_mb <= 16384
         ):
-            raise BrowserContractError(
-                "max_memory_mb must be "
-                "between 128 and 16384."
-            )
+            raise BrowserContractError("max_memory_mb must be 128..16384.")
         if (
             not isinstance(self.max_pids, int)
             or isinstance(self.max_pids, bool)
             or not 16 <= self.max_pids <= 2048
         ):
-            raise BrowserContractError(
-                "max_pids must be between 16 and 2048."
-            )
-        if not isinstance(
-            self.capture_screenshots,
-            bool,
-        ):
-            raise BrowserContractError(
-                "capture_screenshots must be boolean."
-            )
-
-        credential_scopes = _normalize_tokens(
-            self.credential_scopes,
-            field_name="credential_scopes",
-        )
+            raise BrowserContractError("max_pids must be 16..2048.")
+        if not isinstance(self.capture_screenshots, bool):
+            raise BrowserContractError("capture_screenshots must be boolean.")
         object.__setattr__(
             self,
             "credential_scopes",
-            credential_scopes,
+            _tokens(self.credential_scopes, "credential_scopes"),
         )
-
         if (
-            self.filesystem_mode
-            is BrowserFilesystemMode.READ_ONLY_WORKSPACE
-            and self.download_policy
-            is BrowserDownloadPolicy.WORKSPACE_ONLY
+            self.filesystem_mode is BrowserFilesystemMode.READ_ONLY_WORKSPACE
+            and self.download_policy is BrowserDownloadPolicy.WORKSPACE_ONLY
         ):
             raise BrowserContractError(
-                "download_policy=workspace_only "
-                "contradicts "
-                "filesystem_mode=read_only_workspace."
+                "workspace downloads require a writable workspace."
             )
 
-    def _payload_dict(self) -> dict[str, Any]:
+    def _payload(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
-            "ephemeral_runtime_required": (
-                self.ephemeral_runtime_required
-            ),
-            "fresh_browser_session_required": (
-                self.fresh_browser_session_required
-            ),
+            "ephemeral_runtime_required": self.ephemeral_runtime_required,
+            "fresh_browser_session_required": self.fresh_browser_session_required,
             "browser_engine": self.browser_engine.value,
             "filesystem_mode": self.filesystem_mode.value,
             "network_mode": self.network_mode.value,
@@ -750,26 +434,16 @@ class BrowserRuntimeRequirements:
             "max_runtime_seconds": self.max_runtime_seconds,
             "max_memory_mb": self.max_memory_mb,
             "max_pids": self.max_pids,
-            "capture_screenshots": (
-                self.capture_screenshots
-            ),
-            "credential_scopes": list(
-                self.credential_scopes
-            ),
+            "capture_screenshots": self.capture_screenshots,
+            "credential_scopes": list(self.credential_scopes),
         }
 
     @property
     def fingerprint(self) -> str:
-        return fingerprint_payload(
-            "browser-runtime-requirements-v1",
-            self._payload_dict(),
-        )
+        return fingerprint_payload("browser-runtime-requirements-v1", self._payload())
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            **self._payload_dict(),
-            "fingerprint": self.fingerprint,
-        }
+        return {**self._payload(), "fingerprint": self.fingerprint}
 
 
 @dataclass(frozen=True)
@@ -781,232 +455,111 @@ class BrowserExecutionSpec:
     input_fingerprint: str
     runtime_requirements: BrowserRuntimeRequirements
     workspace_id: str | None = None
-    requested_capabilities: tuple[str, ...] = field(
-        default_factory=tuple
-    )
-    effects: tuple[BrowserEffect | str, ...] = (
-        BrowserEffect.BROWSER_READ,
-    )
-    requested_navigation_origins: tuple[str, ...] = field(
-        default_factory=tuple
-    )
-    requested_evidence: tuple[str, ...] = field(
-        default_factory=tuple
-    )
+    requested_capabilities: tuple[str, ...] = field(default_factory=tuple)
+    effects: tuple[BrowserEffect | str, ...] = (BrowserEffect.BROWSER_READ,)
+    requested_navigation_origins: tuple[str, ...] = field(default_factory=tuple)
+    requested_evidence: tuple[str, ...] = field(default_factory=tuple)
     schema_version: str = BROWSER_CONTRACT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        _normalize_schema(self.schema_version)
-
-        object.__setattr__(
-            self,
-            "task_id",
-            _normalize_token(
-                self.task_id,
-                field_name="task_id",
-            ),
-        )
-        object.__setattr__(
-            self,
-            "revision_id",
-            _normalize_token(
-                self.revision_id,
-                field_name="revision_id",
-            ),
-        )
+        _schema(self.schema_version)
+        object.__setattr__(self, "task_id", _token(self.task_id, "task_id"))
+        object.__setattr__(self, "revision_id", _token(self.revision_id, "revision_id"))
         object.__setattr__(
             self,
             "workspace_id",
-            _normalize_optional_token(
-                self.workspace_id,
-                field_name="workspace_id",
-            ),
+            _optional_token(self.workspace_id, "workspace_id"),
         )
-
         try:
             initiator = (
                 self.execution_initiator
-                if isinstance(
-                    self.execution_initiator,
-                    ExecutionInitiator,
-                )
-                else ExecutionInitiator(
-                    str(
-                        self.execution_initiator
-                    ).strip().lower()
-                )
+                if isinstance(self.execution_initiator, ExecutionInitiator)
+                else ExecutionInitiator(str(self.execution_initiator).strip().lower())
             )
         except ValueError as exc:
-            raise BrowserContractError(
-                "Unsupported execution_initiator."
-            ) from exc
-        object.__setattr__(
-            self,
-            "execution_initiator",
-            initiator,
-        )
-
+            raise BrowserContractError("Unsupported execution_initiator.") from exc
+        object.__setattr__(self, "execution_initiator", initiator)
         object.__setattr__(
             self,
             "script_artifact_fingerprint",
-            _normalize_sha256(
-                self.script_artifact_fingerprint,
-                field_name=(
-                    "script_artifact_fingerprint"
-                ),
-            ),
+            _sha(self.script_artifact_fingerprint, "script_artifact_fingerprint"),
         )
         object.__setattr__(
             self,
             "input_fingerprint",
-            _normalize_sha256(
-                self.input_fingerprint,
-                field_name="input_fingerprint",
-            ),
+            _sha(self.input_fingerprint, "input_fingerprint"),
         )
-
-        if not isinstance(
-            self.runtime_requirements,
-            BrowserRuntimeRequirements,
-        ):
+        if not isinstance(self.runtime_requirements, BrowserRuntimeRequirements):
             raise BrowserContractError(
-                "runtime_requirements must be "
-                "BrowserRuntimeRequirements."
+                "runtime_requirements must be BrowserRuntimeRequirements."
             )
-
         object.__setattr__(
             self,
             "requested_capabilities",
-            _normalize_tokens(
-                self.requested_capabilities,
-                field_name="requested_capabilities",
-            ),
+            _tokens(self.requested_capabilities, "requested_capabilities"),
         )
-
-        effects = _normalize_enum_tuple(
-            self.effects,
-            BrowserEffect,
-            field_name="effects",
-        )
+        effects = _enums(self.effects, BrowserEffect, "effects")
         if not effects:
-            raise BrowserContractError(
-                "At least one browser effect declaration "
-                "is required."
-            )
-        object.__setattr__(
-            self,
-            "effects",
-            effects,
-        )
-
-        origins = _normalize_origins(
-            self.requested_navigation_origins
-        )
-        object.__setattr__(
-            self,
-            "requested_navigation_origins",
-            origins,
-        )
+            raise BrowserContractError("At least one browser effect is required.")
+        object.__setattr__(self, "effects", effects)
+        origins = _origins(self.requested_navigation_origins)
+        object.__setattr__(self, "requested_navigation_origins", origins)
         object.__setattr__(
             self,
             "requested_evidence",
-            _normalize_tokens(
-                self.requested_evidence,
-                field_name="requested_evidence",
-            ),
+            _tokens(self.requested_evidence, "requested_evidence"),
         )
 
-        if (
-            self.runtime_requirements.network_mode
-            is BrowserNetworkMode.NONE
-            and origins
-        ):
+        req = self.runtime_requirements
+        if req.network_mode is BrowserNetworkMode.NONE and origins:
             raise BrowserContractError(
-                "network_mode=none cannot request "
-                "navigation origins."
+                "network_mode=none cannot request navigation origins."
             )
-
-        if (
-            self.runtime_requirements.network_mode
-            is BrowserNetworkMode.RESTRICTED_EXTERNAL
-            and not origins
-        ):
+        if req.network_mode is BrowserNetworkMode.RESTRICTED_EXTERNAL and not origins:
             raise BrowserContractError(
-                "restricted_external network requires "
-                "requested origins."
+                "restricted_external requires requested navigation origins."
             )
-
         if (
             BrowserEffect.BROWSER_DOWNLOAD in effects
-            and self.runtime_requirements.download_policy
-            is BrowserDownloadPolicy.DENY
+            and req.download_policy is BrowserDownloadPolicy.DENY
         ):
             raise BrowserContractError(
-                "browser_download effect contradicts "
-                "download_policy=deny."
+                "browser_download contradicts download_policy=deny."
             )
-
         if (
             BrowserEffect.BROWSER_SECRET_USE in effects
-            and not self.runtime_requirements.credential_scopes
+            and not req.credential_scopes
         ):
             raise BrowserContractError(
-                "browser_secret_use requires requested "
-                "credential scopes."
+                "browser_secret_use requires credential scopes."
             )
-
-        if (
-            self.runtime_requirements.credential_scopes
-            and BrowserEffect.BROWSER_SECRET_USE
-            not in effects
-        ):
+        if req.credential_scopes and BrowserEffect.BROWSER_SECRET_USE not in effects:
             raise BrowserContractError(
-                "credential scopes require "
-                "browser_secret_use effect."
+                "credential scopes require browser_secret_use effect."
             )
 
-    def _payload_dict(self) -> dict[str, Any]:
+    def _payload(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "task_id": self.task_id,
             "revision_id": self.revision_id,
             "workspace_id": self.workspace_id,
-            "execution_initiator": (
-                self.execution_initiator.value
-            ),
-            "script_artifact_fingerprint": (
-                self.script_artifact_fingerprint
-            ),
+            "execution_initiator": self.execution_initiator.value,
+            "script_artifact_fingerprint": self.script_artifact_fingerprint,
             "input_fingerprint": self.input_fingerprint,
-            "requested_capabilities": list(
-                self.requested_capabilities
-            ),
-            "effects": [
-                item.value for item in self.effects
-            ],
-            "requested_navigation_origins": list(
-                self.requested_navigation_origins
-            ),
-            "requested_evidence": list(
-                self.requested_evidence
-            ),
-            "runtime_requirements": (
-                self.runtime_requirements.to_dict()
-            ),
+            "requested_capabilities": list(self.requested_capabilities),
+            "effects": [item.value for item in self.effects],
+            "requested_navigation_origins": list(self.requested_navigation_origins),
+            "requested_evidence": list(self.requested_evidence),
+            "runtime_requirements": self.runtime_requirements.to_dict(),
         }
 
     @property
     def fingerprint(self) -> str:
-        return fingerprint_payload(
-            "browser-execution-spec-v1",
-            self._payload_dict(),
-        )
+        return fingerprint_payload("browser-execution-spec-v1", self._payload())
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            **self._payload_dict(),
-            "fingerprint": self.fingerprint,
-        }
+        return {**self._payload(), "fingerprint": self.fingerprint}
 
 
 @dataclass(frozen=True)
@@ -1026,242 +579,125 @@ class BrowserRuntimeAttestation:
     browser_version: str | None = None
     automation_runtime_version: str | None = None
     network_policy_fingerprint: str | None = None
-    governance_policy_fingerprints: tuple[str, ...] = field(
-        default_factory=tuple
-    )
+    governance_policy_fingerprints: tuple[str, ...] = field(default_factory=tuple)
     failure_class: str | None = None
     schema_version: str = BROWSER_CONTRACT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        _normalize_schema(self.schema_version)
-
-        for name in (
-            "task_id",
-            "revision_id",
-            "run_id",
-        ):
-            object.__setattr__(
-                self,
-                name,
-                _normalize_token(
-                    getattr(self, name),
-                    field_name=name,
-                ),
-            )
-
+        _schema(self.schema_version)
+        for name in ("task_id", "revision_id", "run_id"):
+            object.__setattr__(self, name, _token(getattr(self, name), name))
         object.__setattr__(
             self,
             "workspace_id",
-            _normalize_optional_token(
-                self.workspace_id,
-                field_name="workspace_id",
-            ),
+            _optional_token(self.workspace_id, "workspace_id"),
         )
-
-        for name in (
-            "script_artifact_fingerprint",
-            "input_fingerprint",
-        ):
-            object.__setattr__(
-                self,
-                name,
-                _normalize_sha256(
-                    getattr(self, name),
-                    field_name=name,
-                ),
-            )
-
+        for name in ("script_artifact_fingerprint", "input_fingerprint"):
+            object.__setattr__(self, name, _sha(getattr(self, name), name))
         object.__setattr__(
             self,
             "runtime_provider",
-            _normalize_token(
-                self.runtime_provider,
-                field_name="runtime_provider",
-            ),
+            _token(self.runtime_provider, "runtime_provider"),
         )
         object.__setattr__(
             self,
             "browser_engine",
-            _normalize_enum(
-                self.browser_engine,
-                BrowserEngine,
-                field_name="browser_engine",
-            ),
+            _enum(self.browser_engine, BrowserEngine, "browser_engine"),
         )
-
-        started = _normalize_datetime(
-            self.started_at,
-            field_name="started_at",
-        )
-        finished = _normalize_datetime(
-            self.finished_at,
-            field_name="finished_at",
-        )
+        started = _dt(self.started_at, "started_at")
+        finished = _dt(self.finished_at, "finished_at")
         if finished < started:
-            raise BrowserContractError(
-                "finished_at cannot precede started_at."
-            )
-        object.__setattr__(
-            self,
-            "started_at",
-            started,
-        )
-        object.__setattr__(
-            self,
-            "finished_at",
-            finished,
-        )
-
-        result = _normalize_enum(
+            raise BrowserContractError("finished_at cannot precede started_at.")
+        object.__setattr__(self, "started_at", started)
+        object.__setattr__(self, "finished_at", finished)
+        result = _enum(
             self.terminal_result,
             BrowserTerminalResult,
-            field_name="terminal_result",
-        )
-        object.__setattr__(
-            self,
             "terminal_result",
-            result,
         )
+        object.__setattr__(self, "terminal_result", result)
 
         if self.runtime_image_digest is not None:
             raw = self.runtime_image_digest.strip().lower()
-            digest = (
-                raw[7:]
-                if raw.startswith("sha256:")
-                else raw
-            )
-            digest = _normalize_sha256(
-                digest,
-                field_name="runtime_image_digest",
-            )
+            digest = raw[7:] if raw.startswith("sha256:") else raw
             object.__setattr__(
                 self,
                 "runtime_image_digest",
-                f"sha256:{digest}",
+                "sha256:" + _sha(digest, "runtime_image_digest"),
             )
-
-        for name in (
-            "browser_version",
-            "automation_runtime_version",
-        ):
-            raw = getattr(self, name)
-            if raw is not None:
+        for name in ("browser_version", "automation_runtime_version"):
+            if getattr(self, name) is not None:
                 object.__setattr__(
                     self,
                     name,
-                    _normalize_safe_text(
-                        raw,
-                        field_name=name,
-                    ),
+                    _safe_text(getattr(self, name), name),
                 )
-
         if self.network_policy_fingerprint is not None:
             object.__setattr__(
                 self,
                 "network_policy_fingerprint",
-                _normalize_sha256(
+                _sha(
                     self.network_policy_fingerprint,
-                    field_name=(
-                        "network_policy_fingerprint"
-                    ),
+                    "network_policy_fingerprint",
                 ),
             )
-
-        policy_fingerprints = tuple(
-            sorted(
-                {
-                    _normalize_sha256(
-                        item,
-                        field_name=(
-                            "governance_policy_fingerprint"
-                        ),
-                    )
-                    for item in (
-                        self.governance_policy_fingerprints
-                    )
-                }
-            )
-        )
         object.__setattr__(
             self,
             "governance_policy_fingerprints",
-            policy_fingerprints,
+            tuple(
+                sorted(
+                    {
+                        _sha(item, "governance_policy_fingerprint")
+                        for item in self.governance_policy_fingerprints
+                    }
+                )
+            ),
         )
-
         if self.failure_class is not None:
             object.__setattr__(
                 self,
                 "failure_class",
-                _normalize_token(
-                    self.failure_class,
-                    field_name="failure_class",
-                ),
+                _token(self.failure_class, "failure_class"),
             )
-
-        if (
-            result is BrowserTerminalResult.COMPLETED
-            and self.failure_class is not None
-        ):
+        if result is BrowserTerminalResult.COMPLETED and self.failure_class:
             raise BrowserContractError(
-                "Completed attestation cannot "
-                "declare failure_class."
+                "Completed attestation cannot declare failure_class."
             )
-
-        if (
-            result is not BrowserTerminalResult.COMPLETED
-            and self.failure_class is None
-        ):
+        if result is not BrowserTerminalResult.COMPLETED and not self.failure_class:
             raise BrowserContractError(
-                "Non-completed attestation "
-                "requires failure_class."
+                "Non-completed attestation requires failure_class."
             )
 
-    def _payload_dict(self) -> dict[str, Any]:
+    def _payload(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "task_id": self.task_id,
             "revision_id": self.revision_id,
             "workspace_id": self.workspace_id,
             "run_id": self.run_id,
-            "script_artifact_fingerprint": (
-                self.script_artifact_fingerprint
-            ),
+            "script_artifact_fingerprint": self.script_artifact_fingerprint,
             "input_fingerprint": self.input_fingerprint,
             "runtime_provider": self.runtime_provider,
-            "runtime_image_digest": (
-                self.runtime_image_digest
-            ),
+            "runtime_image_digest": self.runtime_image_digest,
             "browser_engine": self.browser_engine.value,
             "browser_version": self.browser_version,
-            "automation_runtime_version": (
-                self.automation_runtime_version
-            ),
-            "network_policy_fingerprint": (
-                self.network_policy_fingerprint
-            ),
+            "automation_runtime_version": self.automation_runtime_version,
+            "network_policy_fingerprint": self.network_policy_fingerprint,
             "governance_policy_fingerprints": list(
                 self.governance_policy_fingerprints
             ),
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat(),
-            "terminal_result": (
-                self.terminal_result.value
-            ),
+            "terminal_result": self.terminal_result.value,
             "failure_class": self.failure_class,
         }
 
     @property
     def fingerprint(self) -> str:
-        return fingerprint_payload(
-            "browser-runtime-attestation-v1",
-            self._payload_dict(),
-        )
+        return fingerprint_payload("browser-runtime-attestation-v1", self._payload())
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            **self._payload_dict(),
-            "fingerprint": self.fingerprint,
-        }
+        return {**self._payload(), "fingerprint": self.fingerprint}
 
 
 @dataclass(frozen=True)
@@ -1277,85 +713,38 @@ class BrowserEvidenceItem:
 
     def __post_init__(self) -> None:
         object.__setattr__(
-            self,
-            "evidence_id",
-            _normalize_token(
-                self.evidence_id,
-                field_name="evidence_id",
-            ),
+            self, "evidence_id", _token(self.evidence_id, "evidence_id")
         )
         object.__setattr__(
-            self,
-            "evidence_type",
-            _normalize_token(
-                self.evidence_type,
-                field_name="evidence_type",
-            ),
+            self, "evidence_type", _token(self.evidence_type, "evidence_type")
         )
-
-        kind = _normalize_enum(
-            self.location_kind,
-            EvidenceLocationKind,
-            field_name="location_kind",
+        kind = _enum(self.location_kind, EvidenceLocationKind, "location_kind")
+        object.__setattr__(self, "location_kind", kind)
+        location = (
+            _relative_path(self.location)
+            if kind is EvidenceLocationKind.RELATIVE_PATH
+            else _token(self.location, "logical_key")
         )
-        object.__setattr__(
-            self,
-            "location_kind",
-            kind,
-        )
-
-        if kind is EvidenceLocationKind.RELATIVE_PATH:
-            location = _normalize_relative_path(
-                self.location
-            )
-        else:
-            location = _normalize_token(
-                self.location,
-                field_name="logical_key",
-            )
-        object.__setattr__(
-            self,
-            "location",
-            location,
-        )
-
-        object.__setattr__(
-            self,
-            "sha256",
-            _normalize_sha256(
-                self.sha256,
-                field_name="evidence_sha256",
-            ),
-        )
-
+        object.__setattr__(self, "location", location)
+        object.__setattr__(self, "sha256", _sha(self.sha256, "evidence_sha256"))
         if (
             not isinstance(self.size_bytes, int)
             or isinstance(self.size_bytes, bool)
             or self.size_bytes < 0
         ):
-            raise BrowserContractError(
-                "size_bytes must be a "
-                "non-negative integer."
-            )
-
+            raise BrowserContractError("size_bytes must be non-negative.")
         object.__setattr__(
             self,
             "redaction_state",
-            _normalize_enum(
-                self.redaction_state,
-                EvidenceRedactionState,
-                field_name="redaction_state",
-            ),
+            _enum(self.redaction_state, EvidenceRedactionState, "redaction_state"),
         )
         object.__setattr__(
             self,
             "privacy_classification",
-            _normalize_enum(
+            _enum(
                 self.privacy_classification,
                 EvidencePrivacyClass,
-                field_name=(
-                    "privacy_classification"
-                ),
+                "privacy_classification",
             ),
         )
 
@@ -1363,18 +752,12 @@ class BrowserEvidenceItem:
         return {
             "evidence_id": self.evidence_id,
             "evidence_type": self.evidence_type,
-            "location_kind": (
-                self.location_kind.value
-            ),
+            "location_kind": self.location_kind.value,
             "location": self.location,
             "sha256": self.sha256,
             "size_bytes": self.size_bytes,
-            "redaction_state": (
-                self.redaction_state.value
-            ),
-            "privacy_classification": (
-                self.privacy_classification.value
-            ),
+            "redaction_state": self.redaction_state.value,
+            "privacy_classification": self.privacy_classification.value,
         }
 
 
@@ -1390,127 +773,48 @@ class BrowserEvidenceManifest:
     schema_version: str = BROWSER_CONTRACT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        _normalize_schema(self.schema_version)
-
-        for name in (
-            "run_id",
-            "task_id",
-            "revision_id",
-        ):
-            object.__setattr__(
-                self,
-                name,
-                _normalize_token(
-                    getattr(self, name),
-                    field_name=name,
-                ),
-            )
-
+        _schema(self.schema_version)
+        for name in ("run_id", "task_id", "revision_id"):
+            object.__setattr__(self, name, _token(getattr(self, name), name))
         object.__setattr__(
             self,
             "workspace_id",
-            _normalize_optional_token(
-                self.workspace_id,
-                field_name="workspace_id",
-            ),
+            _optional_token(self.workspace_id, "workspace_id"),
         )
-
-        for name in (
-            "script_artifact_fingerprint",
-            "input_fingerprint",
-        ):
-            object.__setattr__(
-                self,
-                name,
-                _normalize_sha256(
-                    getattr(self, name),
-                    field_name=name,
-                ),
-            )
-
+        for name in ("script_artifact_fingerprint", "input_fingerprint"):
+            object.__setattr__(self, name, _sha(getattr(self, name), name))
         items = tuple(self.items)
-        if not items:
+        if not items or any(not isinstance(item, BrowserEvidenceItem) for item in items):
             raise BrowserContractError(
-                "Evidence manifest requires "
-                "at least one item."
+                "items must be a non-empty tuple of BrowserEvidenceItem values."
             )
-        if any(
-            not isinstance(
-                item,
-                BrowserEvidenceItem,
-            )
-            for item in items
-        ):
-            raise BrowserContractError(
-                "items must contain "
-                "BrowserEvidenceItem values."
-            )
-
-        ids = [
-            item.evidence_id
-            for item in items
-        ]
-        if len(set(ids)) != len(ids):
-            raise BrowserContractError(
-                "Duplicate evidence_id values "
-                "are not allowed."
-            )
-
-        locations = [
-            (
-                item.location_kind.value,
-                item.location,
-            )
-            for item in items
-        ]
-        if (
-            len(set(locations))
-            != len(locations)
-        ):
-            raise BrowserContractError(
-                "Duplicate evidence locations "
-                "are not allowed."
-            )
-
+        ids = [item.evidence_id for item in items]
+        if len(ids) != len(set(ids)):
+            raise BrowserContractError("Duplicate evidence_id values are not allowed.")
+        locations = [(item.location_kind.value, item.location) for item in items]
+        if len(locations) != len(set(locations)):
+            raise BrowserContractError("Duplicate evidence locations are not allowed.")
         object.__setattr__(
             self,
             "items",
-            tuple(
-                sorted(
-                    items,
-                    key=lambda item: (
-                        item.evidence_id
-                    ),
-                )
-            ),
+            tuple(sorted(items, key=lambda item: item.evidence_id)),
         )
 
-    def _payload_dict(self) -> dict[str, Any]:
+    def _payload(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "run_id": self.run_id,
             "task_id": self.task_id,
             "revision_id": self.revision_id,
             "workspace_id": self.workspace_id,
-            "script_artifact_fingerprint": (
-                self.script_artifact_fingerprint
-            ),
+            "script_artifact_fingerprint": self.script_artifact_fingerprint,
             "input_fingerprint": self.input_fingerprint,
-            "items": [
-                item.to_dict()
-                for item in self.items
-            ],
+            "items": [item.to_dict() for item in self.items],
         }
 
     @property
     def fingerprint(self) -> str:
-        return fingerprint_payload(
-            "browser-evidence-manifest-v1",
-            self._payload_dict(),
-        )
+        return fingerprint_payload("browser-evidence-manifest-v1", self._payload())
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            **self._payload_dict(),
-            "fingerprint": self.fingerprint,
-        }
+        return {**self._payload(), "fingerprint": self.fingerprint}
