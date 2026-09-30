@@ -640,19 +640,20 @@ class TaskExecutor:
                 ),
             )
 
+            start_log_metadata: dict[str, Any] = {
+                "attempt": attempt,
+                "timeout_seconds": task.timeout_seconds,
+            }
+            if governance is not None:
+                start_log_metadata["governance_consumed"] = True
+
             repository.append_log(
                 task.id,
                 TaskLogCreate(
                     run_id=run.id,
                     level="INFO",
                     message="Task execution started.",
-                    metadata={
-                        "attempt": attempt,
-                        "timeout_seconds": task.timeout_seconds,
-                        "governance_consumed": (
-                            governance is not None
-                        ),
-                    },
+                    metadata=start_log_metadata,
                 ),
             )
 
