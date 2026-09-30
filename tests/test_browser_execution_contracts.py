@@ -12,6 +12,7 @@ from backend.browser_runtime import (
     BrowserEffect,
     BrowserEvidenceItem,
     BrowserEvidenceManifest,
+    BrowserExecutionSpec,
     BrowserFilesystemMode,
     BrowserNetworkMode,
     BrowserProvenanceRef,
@@ -106,9 +107,6 @@ def execution_spec(
     )
 
 
-from backend.browser_runtime import BrowserExecutionSpec
-
-
 def evidence_item(
     *,
     evidence_id: str = "result",
@@ -135,6 +133,13 @@ def test_script_artifact_is_immutable_and_deterministic() -> None:
     assert first.fingerprint == second.fingerprint
     assert first.to_dict() == second.to_dict()
     assert first.runtime_kind.value == "python-playwright"
+    assert (
+        replace(
+            first,
+            source_sha256=digest("different-source"),
+        ).fingerprint
+        != first.fingerprint
+    )
 
     with pytest.raises(FrozenInstanceError):
         first.artifact_id = "other"  # type: ignore[misc]
