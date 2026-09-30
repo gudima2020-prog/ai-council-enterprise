@@ -278,6 +278,10 @@ async def test_plain_executor_behavior_is_unchanged() -> None:
         assert "governance_consumed" not in (
             full.runs[0].metadata_json
         )
+        assert all(
+            "governance_consumed" not in log.metadata_json
+            for log in full.logs
+        )
 
 
 @pytest.mark.asyncio
