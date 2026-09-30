@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from backend.core.events import EventBus
+from backend.core.events import Event, EventBus
 from backend.database.base import Base
 from backend.database import models  # noqa: F401
 from backend.task_engine import models as task_models  # noqa: F401
@@ -113,6 +113,47 @@ async def test_failed_task_releases_without_charge() -> None:
         task_id,
         outcome="released",
         reference_id="event-test-failed",
+    )
+
+    assert settled is not None
+    assert settled["reserved_usd"] == 0.0
+    assert settled["spent_usd"] == 0.0
+
+@pytest.mark.asyncio
+async def test_governance_rejection_event_releases_existing_reservation() -> None:
+    scope = make_scope()
+    manager = TaskAdmissionManager(
+        event_bus=EventBus(),
+        session_factory=scope,
+    )
+
+    with scope() as session:
+        task = TaskRepository(session).create(
+            TaskCreate(
+                title="Governance rejected costed task",
+                payload={"_cost": {"estimated_usd": 2.5}},
+            )
+        )
+        TaskStateMachine.transition(task, TaskStatus.QUEUED)
+        task_id = task.id
+
+    admitted = await manager.evaluate_task(
+        task_id,
+        reserve=True,
+        source="test-race-fallback",
+    )
+    assert admitted is not None
+    assert admitted["allowed"] is True
+    before = manager.cost_status(task_id)
+    assert before is not None
+    assert before["reserved_usd"] == 2.5
+
+    settled = await manager.handle_execution_event(
+        Event(
+            event_type="task.executor.governance_rejected",
+            source="task_executor",
+            payload={"task_id": task_id},
+        )
     )
 
     assert settled is not None

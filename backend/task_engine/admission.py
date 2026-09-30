@@ -403,6 +403,7 @@ class TaskAdmissionManager:
         elif event.event_type in {
             "task.executor.failed",
             "task.executor.timed_out",
+            "task.executor.governance_rejected",
             "task.cancelled",
         }:
             outcome = "released"

@@ -15,6 +15,14 @@ from backend.core.logging import LoggerManager
 from backend.database.session import session_scope
 from backend.task_engine.cancellation import TaskCancellationToken
 from backend.task_engine.enums import TaskStatus, TaskType
+from backend.task_engine.governance_consumption import (
+    CanonicalGovernanceRequirements,
+    GovernanceConsumptionError,
+    TaskGovernanceConsumer,
+)
+from backend.task_engine.governance_materialization import (
+    GOVERNANCE_PAYLOAD_KEY,
+)
 from backend.task_engine.queue import QueueItem, TaskQueue
 from backend.task_engine.repository import TaskRepository
 from backend.task_engine.schemas import TaskLogCreate, TaskRunCreate
@@ -43,6 +51,7 @@ class TaskExecutionContext:
     attempt: int
     timeout_seconds: int
     cancellation: TaskCancellationToken
+    governance: CanonicalGovernanceRequirements | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +77,14 @@ class UnsupportedTaskHandler(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class GovernanceClaimRejection:
+    task_id: str
+    workspace_id: str | None
+    run_id: str
+    message: str
+
+
 class TaskExecutor:
     INTERRUPTED_STATUSES = {
         TaskStatus.PLANNING.value,
@@ -90,6 +107,7 @@ class TaskExecutor:
         self._queue = queue
         self._event_bus = event_bus
         self._session_factory = session_factory
+        self._governance_consumer = TaskGovernanceConsumer()
         self._handlers: dict[str, TaskHandler] = {}
         self._active: dict[str, ActiveExecution] = {}
         self._retry_tasks: set[asyncio.Task[None]] = set()
@@ -99,6 +117,7 @@ class TaskExecutor:
         self._cancelled = 0
         self._timed_out = 0
         self._recovered = 0
+        self._governance_rejected = 0
         self.register(TaskType.SYSTEM.value, self._system_handler)
 
     def register(
@@ -134,10 +153,28 @@ class TaskExecutor:
             "cancelled": self._cancelled,
             "timed_out": self._timed_out,
             "recovered": self._recovered,
+            "governance_rejected": self._governance_rejected,
         }
 
     async def execute_queue_item(self, item: QueueItem) -> None:
         claimed = self._claim_task(item.task_id)
+
+        if isinstance(claimed, GovernanceClaimRejection):
+            self._failed += 1
+            self._governance_rejected += 1
+            await self._event_bus.publish(
+                Event(
+                    event_type="task.executor.governance_rejected",
+                    source="task_executor",
+                    workspace_id=claimed.workspace_id,
+                    payload={
+                        "task_id": claimed.task_id,
+                        "run_id": claimed.run_id,
+                        "reason": "canonical_recomputation_failed",
+                    },
+                )
+            )
+            return
 
         if claimed is None:
             await self._event_bus.publish(
@@ -534,10 +571,17 @@ class TaskExecutor:
                 )
             )
 
-    def _claim_task(
+    def _governance_preflight_is_valid(
         self,
         task_id: str,
-    ) -> tuple[TaskExecutionContext, str] | None:
+    ) -> bool | None:
+        """Check governance integrity without mutating Task execution state.
+
+        This is an advisory pre-admission optimization for executors that
+        reserve external resources before the authoritative claim. The
+        authoritative claim still recomputes governance again to close the
+        time-of-check/time-of-use gap.
+        """
         with self._session_factory() as session:
             repository = TaskRepository(session)
             task = repository.get(task_id)
@@ -551,18 +595,88 @@ class TaskExecutor:
             }:
                 return None
 
-            TaskStateMachine.transition(task, TaskStatus.RUNNING)
+            try:
+                self._governance_consumer.consume(task)
+            except GovernanceConsumptionError:
+                return False
+
+            return True
+
+    def _claim_task(
+        self,
+        task_id: str,
+    ) -> (
+        tuple[TaskExecutionContext, str]
+        | GovernanceClaimRejection
+        | None
+    ):
+        with self._session_factory() as session:
+            repository = TaskRepository(session)
+            task = repository.get(task_id)
+
+            if task is None:
+                return None
+
+            if task.status not in {
+                TaskStatus.QUEUED.value,
+                TaskStatus.RETRYING.value,
+            }:
+                return None
 
             attempt = task.retry_count + 1
+            try:
+                governance = self._governance_consumer.consume(task)
+            except GovernanceConsumptionError as exc:
+                run_id = self._reject_governance_claim(
+                    task=task,
+                    repository=repository,
+                    attempt=attempt,
+                    exc=exc,
+                )
+                return GovernanceClaimRejection(
+                    task_id=task.id,
+                    workspace_id=task.workspace_id,
+                    run_id=run_id,
+                    message=str(exc),
+                )
+
+            TaskStateMachine.transition(task, TaskStatus.RUNNING)
+
+            run_metadata: dict[str, Any] = {
+                "executor": task.executor,
+            }
+            if governance is not None:
+                run_metadata.update(
+                    {
+                        "governance_consumed": True,
+                        "governance_revision_id": (
+                            governance.revision_id
+                        ),
+                        "governance_plan_fingerprint": (
+                            governance.plan_fingerprint
+                        ),
+                        "governance_authorization_state": (
+                            governance.authorization_state
+                        ),
+                    }
+                )
+
             run = repository.append_run(
                 task.id,
                 TaskRunCreate(
                     status=TaskStatus.RUNNING,
                     attempt=attempt,
                     started_at=utc_now(),
-                    metadata={"executor": task.executor},
+                    metadata=run_metadata,
                 ),
             )
+
+            start_log_metadata: dict[str, Any] = {
+                "attempt": attempt,
+                "timeout_seconds": task.timeout_seconds,
+            }
+            if governance is not None:
+                start_log_metadata["governance_consumed"] = True
 
             repository.append_log(
                 task.id,
@@ -570,12 +684,12 @@ class TaskExecutor:
                     run_id=run.id,
                     level="INFO",
                     message="Task execution started.",
-                    metadata={
-                        "attempt": attempt,
-                        "timeout_seconds": task.timeout_seconds,
-                    },
+                    metadata=start_log_metadata,
                 ),
             )
+
+            handler_payload = dict(task.payload_json or {})
+            handler_payload.pop(GOVERNANCE_PAYLOAD_KEY, None)
 
             context = TaskExecutionContext(
                 task_id=task.id,
@@ -583,14 +697,60 @@ class TaskExecutor:
                 task_type=task.task_type,
                 title=task.title,
                 description=task.description,
-                payload=dict(task.payload_json or {}),
+                payload=handler_payload,
                 executor=task.executor,
                 attempt=attempt,
                 timeout_seconds=task.timeout_seconds,
                 cancellation=TaskCancellationToken(),
+                governance=governance,
             )
 
             return context, run.id
+
+    @staticmethod
+    def _reject_governance_claim(
+        *,
+        task,
+        repository: TaskRepository,
+        attempt: int,
+        exc: GovernanceConsumptionError,
+    ) -> str:
+        started_at = utc_now()
+        TaskStateMachine.transition(task, TaskStatus.FAILED)
+        run = repository.append_run(
+            task.id,
+            TaskRunCreate(
+                status=TaskStatus.FAILED,
+                attempt=attempt,
+                started_at=started_at,
+                finished_at=utc_now(),
+                duration_ms=0.0,
+                error=str(exc),
+                metadata={
+                    "executor": task.executor,
+                    "governance_preflight": True,
+                    "governance_consumption": "rejected",
+                    "retry_scheduled": False,
+                },
+            ),
+        )
+        repository.append_log(
+            task.id,
+            TaskLogCreate(
+                run_id=run.id,
+                level="ERROR",
+                message=(
+                    "Task execution rejected because materialized "
+                    "governance failed canonical recomputation."
+                ),
+                metadata={
+                    "governance_preflight": True,
+                    "error_type": exc.__class__.__name__,
+                    "retry_scheduled": False,
+                },
+            ),
+        )
+        return run.id
 
     def _complete_task(
         self,

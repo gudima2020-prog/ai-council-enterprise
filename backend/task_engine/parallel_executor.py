@@ -74,6 +74,17 @@ class ParallelTaskExecutor(TaskExecutor):
                 return
 
         if self._admission_manager is not None:
+            governance_valid = self._governance_preflight_is_valid(
+                item.task_id
+            )
+            if governance_valid is False:
+                await super().execute_queue_item(item)
+                if self._workflow_engine is not None:
+                    await self._workflow_engine.handle_terminal_task(
+                        item.task_id
+                    )
+                return
+
             admission = await self._admission_manager.evaluate_task(
                 item.task_id,
                 reserve=True,
