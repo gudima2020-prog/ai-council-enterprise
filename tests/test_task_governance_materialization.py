@@ -446,3 +446,157 @@ async def test_unknown_workflow_node_materialization_fails_closed() -> None:
                 instance["id"],
                 {"missing": governance_spec()},
             )
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "target_path",
+    [
+        "_governance",
+        "_governance.attacker",
+    ],
+)
+async def test_workflow_definition_rejects_governance_result_mapping(
+    target_path: str,
+) -> None:
+    scope = make_scope()
+    event_bus = EventBus()
+
+    with scope() as session:
+        service = WorkflowTemplateService(session, event_bus)
+
+        with pytest.raises(
+            WorkflowTemplateError,
+            match="reserved _governance metadata",
+        ):
+            await service.create_template(
+                WorkflowTemplateCreate(
+                    name=f"Reserved mapping {target_path}",
+                    root_node_key="execute",
+                    nodes=[
+                        WorkflowNodeDefinition(
+                            key="execute",
+                            title="Execute",
+                            payload={"action": "echo"},
+                            result_mapping={
+                                target_path: "input.envelope",
+                            },
+                        )
+                    ],
+                )
+            )
+
+
+@pytest.mark.asyncio
+async def test_prepare_task_rejects_tampered_governance_mapping() -> None:
+    scope = make_scope()
+    event_bus = EventBus()
+
+    with scope() as session:
+        service = WorkflowTemplateService(session, event_bus)
+        template = await service.create_template(
+            WorkflowTemplateCreate(
+                name="Runtime reserved mapping check",
+                root_node_key="execute",
+                input_schema={"required": ["envelope"]},
+                nodes=[
+                    WorkflowNodeDefinition(
+                        key="execute",
+                        title="Execute",
+                        payload={"action": "echo"},
+                        result_mapping={
+                            "value": "input.envelope",
+                        },
+                    )
+                ],
+            )
+        )
+        instance = await service.instantiate(
+            template["id"],
+            WorkflowInstantiateRequest(
+                input={"envelope": {"attacker": True}},
+            ),
+        )
+        assert instance is not None
+
+        task_id = instance["node_task_map"]["execute"]
+        task = session.get(task_models.TaskModel, task_id)
+        assert task is not None
+
+        payload = deepcopy(task.payload_json)
+        payload["_workflow"]["result_mapping"] = {
+            "_governance": "input.envelope",
+        }
+        TaskRepository(session).update(
+            task,
+            TaskUpdate(payload=payload),
+        )
+
+        with pytest.raises(
+            WorkflowTemplateError,
+            match="reserved _governance metadata",
+        ):
+            service.prepare_task(task_id)
+
+        assert GOVERNANCE_PAYLOAD_KEY not in task.payload_json
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("binding_field", "tampered_value"),
+    [
+        ("instance_id", "other_instance"),
+        ("template_id", "other_template"),
+        ("node_key", "other_node"),
+    ],
+)
+async def test_workflow_materialization_rejects_inconsistent_binding(
+    binding_field: str,
+    tampered_value: str,
+) -> None:
+    scope = make_scope()
+    event_bus = EventBus()
+
+    with scope() as session:
+        service = WorkflowTemplateService(session, event_bus)
+        template = await service.create_template(
+            WorkflowTemplateCreate(
+                name=f"Binding check {binding_field}",
+                root_node_key="execute",
+                nodes=[
+                    WorkflowNodeDefinition(
+                        key="execute",
+                        title="Execute",
+                        payload={"action": "echo"},
+                    )
+                ],
+            )
+        )
+        instance = await service.instantiate(
+            template["id"],
+            WorkflowInstantiateRequest(),
+        )
+        assert instance is not None
+
+        task_id = instance["node_task_map"]["execute"]
+        task = session.get(task_models.TaskModel, task_id)
+        assert task is not None
+
+        payload = deepcopy(task.payload_json)
+        payload["_workflow"][binding_field] = tampered_value
+        TaskRepository(session).update(
+            task,
+            TaskUpdate(payload=payload),
+        )
+
+        with pytest.raises(
+            WorkflowTemplateError,
+            match="inconsistent workflow instance/node binding",
+        ):
+            service.materialize_governance(
+                instance["id"],
+                {"execute": governance_spec()},
+            )
+
+        assert GOVERNANCE_PAYLOAD_KEY not in task.payload_json
