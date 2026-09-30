@@ -253,6 +253,7 @@ for _cost_event_type in (
     "task.executor.completed",
     "task.executor.failed",
     "task.executor.timed_out",
+    "task.executor.governance_rejected",
     "task.cancelled",
 ):
     app_container.event_bus.subscribe(
