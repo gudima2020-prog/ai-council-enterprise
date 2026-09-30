@@ -159,4 +159,3 @@ async def test_governance_rejection_event_releases_existing_reservation() -> Non
     assert settled is not None
     assert settled["reserved_usd"] == 0.0
     assert settled["spent_usd"] == 0.0
-
