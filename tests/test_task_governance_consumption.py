@@ -63,11 +63,13 @@ def make_scope():
 def governance_spec(
     *,
     revision_id: str = "rev_consume_001",
+    side_effects: tuple[str, ...] = (),
 ) -> GovernanceMaterializationSpec:
     return GovernanceMaterializationSpec(
         revision_id=revision_id,
         risk_class=TaskRiskClass.HIGH,
         execution_initiator="agent",
+        side_effects=side_effects,
         requested_capabilities=(
             "shell.execute",
             "github.issue.comment",
@@ -145,6 +147,33 @@ def test_consumer_returns_immutable_canonical_requirements_only() -> None:
             consumed.task_id = "task_other"  # type: ignore[misc]
 
 
+def test_human_gate_requirement_remains_requirement_only_metadata() -> None:
+    scope = make_scope()
+
+    with scope() as session:
+        repository = TaskRepository(session)
+        task = repository.create(
+            TaskCreate(
+                title="External write requirement",
+                payload={"action": "echo"},
+            )
+        )
+        repository.materialize_governance(
+            task,
+            governance_spec(side_effects=("external_write",)),
+        )
+
+        consumed = TaskGovernanceConsumer().consume(task)
+
+        assert consumed is not None
+        assert consumed.human_gate_required is True
+        assert consumed.authorization_state == "requirements_only"
+        serialized = consumed.to_dict()
+        assert "human_approval" not in serialized
+        assert "approval_status" not in serialized
+        assert "authorized" not in serialized
+
+
 @pytest.mark.asyncio
 async def test_executor_passes_canonical_requirements_and_sanitizes_payload() -> None:
     scope = make_scope()
@@ -195,6 +224,7 @@ async def test_executor_passes_canonical_requirements_and_sanitizes_payload() ->
         full = TaskRepository(session).get_full(task_id)
         assert full is not None
         assert full.status == TaskStatus.COMPLETED.value
+        assert GOVERNANCE_PAYLOAD_KEY in full.payload_json
         assert len(full.runs) == 1
         metadata = full.runs[0].metadata_json
         assert metadata["governance_consumed"] is True
