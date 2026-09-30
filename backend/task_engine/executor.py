@@ -103,14 +103,11 @@ class TaskExecutor:
         queue: TaskQueue,
         event_bus: EventBus,
         session_factory: SessionContextFactory = session_scope,
-        governance_consumer: TaskGovernanceConsumer | None = None,
     ) -> None:
         self._queue = queue
         self._event_bus = event_bus
         self._session_factory = session_factory
-        self._governance_consumer = (
-            governance_consumer or TaskGovernanceConsumer()
-        )
+        self._governance_consumer = TaskGovernanceConsumer()
         self._handlers: dict[str, TaskHandler] = {}
         self._active: dict[str, ActiveExecution] = {}
         self._retry_tasks: set[asyncio.Task[None]] = set()
