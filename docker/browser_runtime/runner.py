@@ -110,10 +110,13 @@ def read_stdin() -> bytes:
     return raw
 
 
-def validate_path(path: str, expected_prefix: str) -> Path:
+def validate_path(path: str, expected_root: str) -> Path:
     resolved = Path(path).resolve()
-    if not str(resolved).startswith(expected_prefix):
-        raise RunnerError("runtime_path_invalid")
+    root = Path(expected_root).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise RunnerError("runtime_path_invalid") from exc
     return resolved
 
 
@@ -160,7 +163,7 @@ def main() -> int:
         if not 1024 <= args.max_result_bytes <= 4 * 1024 * 1024:
             raise RunnerError("result_limit_invalid")
 
-        script = validate_path(args.script, "/input/")
+        script = validate_path(args.script, "/input")
         fixture = validate_path(args.fixture_root, "/fixture")
         if not script.is_file() or not fixture.is_dir():
             raise RunnerError("runtime_input_missing")
