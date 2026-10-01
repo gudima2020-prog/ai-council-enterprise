@@ -315,6 +315,8 @@ def _relative_path(value: str) -> str:
     parts = normalized.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         raise BrowserContractError("Evidence path must be canonical and traversal-free.")
+    for part in parts:
+        _reject_secret_like(part, "path_segment")
     path = PurePosixPath(*parts)
     if path.is_absolute():
         raise BrowserContractError("Evidence path must be relative.")
