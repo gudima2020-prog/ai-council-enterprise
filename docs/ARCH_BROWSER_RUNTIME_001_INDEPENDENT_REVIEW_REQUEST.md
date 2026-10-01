@@ -107,9 +107,11 @@ forced removal.
 Check that timeout does not silently retry or fall back to host execution.
 
 On Windows, specifically verify the real service path succeeds with the
-transient source **directory** bind. A direct single-file bind from the user's
-Temp directory previously produced Docker daemon return code 125 with
-`CreateFile ... Access is denied`; regression to that behavior is a blocker.
+transient source **directory** bind created beside the validated fixture root,
+not under the user's Temp tree. Earlier candidates failed with Docker daemon
+return code 125 for both a direct Temp-file bind (`CreateFile ... Access is
+denied`) and a Temp-directory bind (generic `Access is denied`). Regression to
+either Temp-based staging path or either failure mode is a blocker.
 
 ### E. Trusted runner vs untrusted script
 
