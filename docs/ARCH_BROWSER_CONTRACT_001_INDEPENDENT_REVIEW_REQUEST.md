@@ -142,23 +142,25 @@ Acceptance requires all of the following:
    protected `secret://provider/key` reference.
 3. Confirm there is no serialized arbitrary free-text field and no field that
    bypasses its class validator before `to_dict()`.
-4. Confirm public identifiers reject delimiter-shaped carrier strings and
-   common header/key/password-like prefixes rather than relying on one
-   field-specific check.
+4. Confirm public identifiers reject embedded/wrapped credential-like
+   signatures and sensitive lexemes at any position, not only at the start of
+   the string.
 5. Re-run the R3 generic-identifier probes against at least:
    artifact ID, Task ID, Workspace ID, requested capability, requested evidence,
    runtime provider, failure class, evidence ID/type, and logical key.
-6. Confirm a value-shaped sensitive token cannot be embedded in either the
-   provider or key portion of a `secret://provider/key` scope, while ordinary
-   metadata provider/key names remain valid.
-7. Confirm a value-shaped sensitive token cannot be embedded in an origin host
-   label and survive canonicalization.
-8. Confirm path/entrypoint segments continue to use segment-level carrier
-   rejection.
-9. Confirm browser/runtime version fields remain narrow identifiers, not generic
-   text.
-10. Confirm typed SHA-256 fields remain valid and are not accidentally rejected
-    merely because they are high-entropy hexadecimal strings.
+6. Confirm a value-shaped sensitive token cannot be embedded or wrapped in
+   either the provider or key portion of a `secret://provider/key` scope,
+   while ordinary metadata provider/key names such as `OPENAI_API_KEY` remain
+   valid.
+7. Confirm embedded/wrapped sensitive signatures cannot survive in origin host
+   labels after canonicalization.
+8. Confirm path/entrypoint segments reject embedded/wrapped carrier forms,
+   including assignment-shaped forms.
+9. Confirm browser/runtime version fields remain narrow identifiers and reject
+   embedded/wrapped carrier signatures rather than checking only prefixes.
+10. Confirm wrapped long-hex carrier values are rejected from generic
+    identifier/path/version/origin surfaces while typed SHA-256 fields remain
+    valid.
 11. Confirm rejected objects cannot be serialized or fingerprinted because
     construction fails first. Confirm arbitrary raw task input is not retained
     in these dataclasses: only its SHA-256 input fingerprint is stored.
