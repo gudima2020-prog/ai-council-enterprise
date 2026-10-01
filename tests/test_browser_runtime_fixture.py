@@ -79,6 +79,7 @@ def spec(
     script: BrowserScriptArtifact | None = None,
     runtime_requirements: BrowserRuntimeRequirements | None = None,
     effects: tuple[BrowserEffect, ...] = (BrowserEffect.BROWSER_READ,),
+    origins: tuple[str, ...] = (),
 ) -> BrowserExecutionSpec:
     selected = script or artifact()
     return BrowserExecutionSpec(
@@ -91,6 +92,7 @@ def spec(
         runtime_requirements=runtime_requirements or requirements(),
         requested_capabilities=("browser.execute", "browser.read"),
         effects=effects,
+        requested_navigation_origins=origins,
         requested_evidence=("structured_result",),
     )
 
@@ -162,7 +164,7 @@ def test_success_uses_digest_bound_network_none_container(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    raw_input = {"query": "fixture"}
+    raw_input = {"query": "input-only-marker-7f6c4b"}
     stub = RunStub(
         subprocess.CompletedProcess(
             ["docker", "run"],
@@ -286,9 +288,6 @@ def test_artifact_fingerprint_drift_rejected_before_docker(
     (
         requirements(network_mode=BrowserNetworkMode.NONE),
         requirements(
-            network_mode=BrowserNetworkMode.RESTRICTED_EXTERNAL,
-        ),
-        requirements(
             filesystem_mode=BrowserFilesystemMode.WORKSPACE_ONLY,
         ),
         requirements(browser_engine=BrowserEngine.FIREFOX),
@@ -319,6 +318,35 @@ def test_unsupported_runtime_profiles_fail_before_docker(
                 raw_input,
                 runtime_requirements=bad_requirements,
             ),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+
+def test_restricted_external_profile_fails_before_docker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    candidate = spec(
+        raw_input,
+        runtime_requirements=requirements(
+            network_mode=BrowserNetworkMode.RESTRICTED_EXTERNAL,
+        ),
+        origins=("https://example.com",),
+    )
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Docker must not be called.")
+        ),
+    )
+
+    with pytest.raises(BrowserRuntimeProfileError):
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=candidate,
             source_bytes=SOURCE,
             raw_input=raw_input,
             fixture_root=fixture_root(tmp_path),
