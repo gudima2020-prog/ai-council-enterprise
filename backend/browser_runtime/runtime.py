@@ -489,6 +489,7 @@ class BrowserRuntimeService:
         return [
             self.config.docker_binary,
             "run",
+            "--interactive",
             "--rm",
             "--name",
             container_name,
