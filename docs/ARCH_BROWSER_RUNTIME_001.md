@@ -50,8 +50,10 @@ Before runtime image inspection or execution, the service validates:
 4. the deterministic fixture root exists, is bounded and contains no
    symlink/junction indirection.
 
-Raw input is transported to the container over stdin. It is not placed in the
-Docker command, environment or a persistent host file.
+Raw input is transported to the container over stdin. Docker stdin is kept open
+explicitly with `--interactive`; without that flag the container would receive
+EOF instead of the bound input payload. The raw input is not placed in the Docker
+command, environment or a persistent host file.
 
 ## Trusted image binding
 
@@ -81,6 +83,7 @@ image automatically.
 The execution command is shell-free and includes:
 
 ```text
+--interactive
 --rm
 --name <unique run name>
 --pull=never
@@ -220,9 +223,10 @@ The preparation gate:
 
 - requires a local Docker daemon;
 - builds the dedicated runtime image;
-- verifies trusted labels;
-- runs the deterministic fixture smoke test with `--network=none` and the same
-  isolation flags;
+- resolves the image tag to its local image digest;
+- verifies trusted labels against that digest;
+- runs the deterministic fixture smoke test by digest with `--interactive`,
+  `--network=none` and the same isolation flags;
 - prints the resulting image ID.
 
 The runtime itself never auto-builds or auto-pulls.
