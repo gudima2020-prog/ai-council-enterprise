@@ -258,6 +258,21 @@ free-text carrier. A future field that needs free text requires an explicit
 privacy/redaction contract and cannot silently reuse the public-identifier
 validator.
 
+Carrier validation is deliberately **position-independent** for public
+identifiers, versions, path segments and origin labels: recognized
+credential/header/key lexemes and known token signatures are rejected wherever
+they occur in the validated string, not only at position zero. Long hexadecimal
+value-shaped substrings are likewise rejected from these generic surfaces;
+typed SHA-256 fields remain the only place where 64-hex cryptographic values are
+expected.
+
+Protected references use a separate rule because metadata names such as
+`OPENAI_API_KEY` or `PASSWORD` are legitimate reference names. Provider/key
+segments may name a secret but must not contain an embedded resolved-value
+shape or known credential token signature. This distinction preserves
+metadata-only references without turning the reference string into a value
+carrier.
+
 A constructor that rejects a carrier must fail before `to_dict()` can expose
 that value. Canonical serialization/fingerprinting therefore operates only on
 already-validated contract state.
