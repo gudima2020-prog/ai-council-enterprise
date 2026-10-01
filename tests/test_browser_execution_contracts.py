@@ -323,6 +323,88 @@ def test_credential_scope_is_request_only_and_must_match_effect() -> None:
 
 
 @pytest.mark.parametrize(
+    "raw_secret",
+    (
+        "hunter" + "2",
+        "sk-" + "proj-" + "abc123def456",
+        "approval-" + "token-abc123",
+        "a" * 64,
+        "sessionid" + ":abc123",
+        "author" + "ization:bearerabc123",
+    ),
+)
+def test_credential_scopes_reject_raw_secret_material(
+    raw_secret: str,
+) -> None:
+    with pytest.raises(BrowserContractError):
+        BrowserRuntimeRequirements(
+            credential_scopes=(raw_secret,),
+        )
+
+
+@pytest.mark.parametrize(
+    "raw_secret",
+    (
+        "Author" + "ization: Bearer abc123",
+        "Cook" + "ie: sessionid=abc123",
+        "-----BEGIN " + "PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+        "hunter" + "2",
+        "sk-" + "proj-abc123",
+        "approval-" + "token-abc123",
+        "a" * 64,
+    ),
+)
+def test_attestation_versions_reject_raw_secret_material(
+    raw_secret: str,
+) -> None:
+    artifact = script_artifact()
+    now = datetime.now(timezone.utc)
+
+    kwargs = dict(
+        task_id="task-001",
+        revision_id="rev-browser-001",
+        run_id="run-001",
+        script_artifact_fingerprint=artifact.fingerprint,
+        input_fingerprint=fingerprint_input({"query": "status"}),
+        runtime_provider="docker-worker",
+        browser_engine="chromium",
+        started_at=now,
+        finished_at=now,
+        terminal_result="completed",
+    )
+
+    with pytest.raises(BrowserContractError):
+        BrowserRuntimeAttestation(
+            **kwargs,
+            browser_version=raw_secret,
+        )
+
+    with pytest.raises(BrowserContractError):
+        BrowserRuntimeAttestation(
+            **kwargs,
+            automation_runtime_version=raw_secret,
+        )
+
+
+def test_credential_scope_is_reference_only_not_secret_value() -> None:
+    requirements = BrowserRuntimeRequirements(
+        credential_scopes=(
+            "secret://ENV/OPENAI_API_KEY",
+            "secret://windows-dpapi/browser/account-a",
+        )
+    )
+
+    assert requirements.credential_scopes == (
+        "secret://env/OPENAI_API_KEY",
+        "secret://windows-dpapi/browser/account-a",
+    )
+    serialized = canonical_json(requirements.to_dict())
+    assert "hunter" + "2" not in serialized
+    assert "Bearer " not in serialized
+    assert "BEGIN " + "PRIVATE KEY" not in serialized
+
+
+@pytest.mark.parametrize(
     "bad_path",
     (
         "../secret.txt",
