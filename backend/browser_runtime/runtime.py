@@ -80,6 +80,7 @@ class BrowserRuntimeConfig:
     docker_binary: str = "docker"
     cpu_limit: float = 1.0
     output_limit_bytes: int = 256 * 1024
+    input_limit_bytes: int = 1024 * 1024
     fixture_max_files: int = 256
     fixture_max_bytes: int = 8 * 1024 * 1024
     tmpfs_size_mb: int = 256
@@ -94,6 +95,8 @@ class BrowserRuntimeConfig:
             raise ValueError("cpu_limit must be 0.1..8.0.")
         if not 1024 <= self.output_limit_bytes <= 4 * 1024 * 1024:
             raise ValueError("output_limit_bytes must be 1 KiB..4 MiB.")
+        if not 1024 <= self.input_limit_bytes <= 8 * 1024 * 1024:
+            raise ValueError("input_limit_bytes must be 1 KiB..8 MiB.")
         if not 1 <= self.fixture_max_files <= 4096:
             raise ValueError("fixture_max_files must be 1..4096.")
         if not 1024 <= self.fixture_max_bytes <= 128 * 1024 * 1024:
@@ -170,12 +173,24 @@ class BrowserRuntimeService:
                 image_ref=image.digest,
                 container_name=container_name,
             )
-            stdin_payload = canonical_json(
-                {
-                    "schema_version": RUNNER_SCHEMA_VERSION,
-                    "input": raw_input,
-                }
-            )
+            try:
+                stdin_payload = canonical_json(
+                    {
+                        "schema_version": RUNNER_SCHEMA_VERSION,
+                        "input": raw_input,
+                    }
+                )
+            except Exception as exc:
+                raise BrowserRuntimeBindingError(
+                    "Raw browser input is not canonical-JSON serializable."
+                ) from exc
+            if (
+                len(stdin_payload.encode("utf-8"))
+                > self.config.input_limit_bytes
+            ):
+                raise BrowserRuntimeBindingError(
+                    "Raw browser input exceeds the configured limit."
+                )
 
             try:
                 completed = subprocess.run(
@@ -348,6 +363,11 @@ class BrowserRuntimeService:
 
     def _validate_fixture_root(self, fixture_root: Path) -> Path:
         root = Path(fixture_root)
+        root_is_junction = getattr(root, "is_junction", lambda: False)()
+        if root.is_symlink() or root_is_junction:
+            raise BrowserRuntimeBindingError(
+                "fixture_root cannot be a symlink or junction."
+            )
         if not root.is_dir():
             raise BrowserRuntimeBindingError(
                 "fixture_root must be an existing directory."
@@ -356,9 +376,10 @@ class BrowserRuntimeService:
         count = 0
         total = 0
         for path in root.rglob("*"):
-            if path.is_symlink():
+            path_is_junction = getattr(path, "is_junction", lambda: False)()
+            if path.is_symlink() or path_is_junction:
                 raise BrowserRuntimeBindingError(
-                    "Browser fixture cannot contain symlinks."
+                    "Browser fixture cannot contain symlinks or junctions."
                 )
             if path.is_file():
                 resolved = path.resolve()
