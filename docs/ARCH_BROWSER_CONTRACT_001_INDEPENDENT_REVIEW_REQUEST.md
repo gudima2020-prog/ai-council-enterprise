@@ -148,9 +148,9 @@ Acceptance requires all of the following:
 5. Re-run the R3 generic-identifier probes against at least:
    artifact ID, Task ID, Workspace ID, requested capability, requested evidence,
    runtime provider, failure class, evidence ID/type, and logical key.
-6. Confirm a value-shaped protected token cannot be embedded as the key portion
-   of a `secret://provider/key` scope, while ordinary metadata key names remain
-   valid.
+6. Confirm a value-shaped sensitive token cannot be embedded in either the
+   provider or key portion of a `secret://provider/key` scope, while ordinary
+   metadata provider/key names remain valid.
 7. Confirm a value-shaped sensitive token cannot be embedded in an origin host
    label and survive canonicalization.
 8. Confirm path/entrypoint segments continue to use segment-level carrier
@@ -160,7 +160,8 @@ Acceptance requires all of the following:
 10. Confirm typed SHA-256 fields remain valid and are not accidentally rejected
     merely because they are high-entropy hexadecimal strings.
 11. Confirm rejected objects cannot be serialized or fingerprinted because
-    construction fails first.
+    construction fails first. Confirm arbitrary raw task input is not retained
+    in these dataclasses: only its SHA-256 input fingerprint is stored.
 12. Confirm the remediation adds no resolver, grant, authorization, network
     execution, browser launch, dependency, migration, or Skill runtime.
 13. Confirm all B2 effect/network contradiction tests remain fail-closed.
