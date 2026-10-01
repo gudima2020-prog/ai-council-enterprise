@@ -195,6 +195,7 @@ def test_success_uses_digest_bound_network_none_container(
 
     run_call = next(call for call in stub.calls if call[0][1] == "run")
     command, kwargs = run_call
+    assert "--interactive" in command
     assert "--network=none" in command
     assert "--read-only" in command
     assert "--cap-drop=ALL" in command
