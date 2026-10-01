@@ -250,6 +250,7 @@ def _credential_scope(value: str) -> str:
         ) from exc
     if not _SECRET_PROVIDER_RE.fullmatch(provider_key):
         raise BrowserContractError("Invalid credential scope provider key.")
+    _reject_secret_like(provider_key, "credential_scope_provider")
     if not _SECRET_KEY_RE.fullmatch(secret_key):
         raise BrowserContractError("Invalid credential scope secret key.")
     parts = secret_key.split("/")
