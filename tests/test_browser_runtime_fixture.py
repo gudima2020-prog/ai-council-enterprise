@@ -233,6 +233,11 @@ def test_success_uses_digest_bound_network_none_container(
     assert raw_input["query"] not in " ".join(command)
 
 
+def test_staging_directory_mode_avoids_windows_restrictive_acl() -> None:
+    assert BrowserRuntimeService._staging_directory_mode("nt") == 0o755
+    assert BrowserRuntimeService._staging_directory_mode("posix") == 0o700
+
+
 @pytest.mark.parametrize(
     ("changed_source", "changed_input"),
     (
@@ -240,11 +245,6 @@ def test_success_uses_digest_bound_network_none_container(
         (None, {"query": "changed"}),
     ),
 )
-def test_staging_directory_mode_avoids_windows_restrictive_acl() -> None:
-    assert BrowserRuntimeService._staging_directory_mode("nt") == 0o755
-    assert BrowserRuntimeService._staging_directory_mode("posix") == 0o700
-
-
 def test_binding_drift_rejected_before_docker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
