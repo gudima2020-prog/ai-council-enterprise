@@ -107,11 +107,15 @@ Only two bind mounts are supplied:
 - deterministic fixture root → `/fixture`, read-only.
 
 The source is written before container creation and its directory is mounted
-read-only. The runtime deliberately mounts the directory rather than an
-individual Windows temp file because Docker Desktop may reject direct file bind
-mounts from the user's temporary directory with a host `CreateFile ... Access
-is denied` error. No permission/grant semantics are changed by this portability
-fix.
+read-only. The transient source directory is created beside the already-validated
+fixture root, on the same Docker-accessible project path, and is removed when the
+run completes. It is not created under the Windows user Temp directory.
+
+This is deliberate: Docker Desktop may reject both direct file binds and
+directory binds from the user's Temp tree with `CreateFile ... Access is denied`
+or generic `Access is denied` errors. The source staging directory contains only
+the exact frozen `script.py`; only that transient directory is mounted at
+`/input`. No permission/grant semantics are changed by this portability fix.
 
 There is no host workspace write mount, Docker socket mount, browser profile,
 cookie jar, credential mount or secret environment variable.
