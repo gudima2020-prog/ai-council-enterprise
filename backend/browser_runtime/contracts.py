@@ -10,12 +10,36 @@ import re
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 
+from backend.secrets.references import SecretReferenceError, parse_secret_reference
 from backend.task_engine.governance import ExecutionInitiator
 
 
 BROWSER_CONTRACT_SCHEMA_VERSION = "arch-browser-contract-001.v1"
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]*$")
+_VERSION_RE = re.compile(r"^[0-9][0-9A-Za-z._+-]{0,47}$")
+_SECRET_PROVIDER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
+_SECRET_KEY_RE = re.compile(r"^[A-Za-z0-9._/-]{1,240}$")
+_OBVIOUS_SECRET_LITERALS = frozenset(
+    {"hunter2", "password", "passwd", "secret", "changeme", "letmein"}
+)
+_SECRET_VALUE_PREFIXES = (
+    "authorization:",
+    "cookie:",
+    "set-cookie:",
+    "sessionid:",
+    "approval-token-",
+    "sk-proj-",
+    "sk-live-",
+    "sk_test_",
+    "sk_live_",
+    "ghp_",
+    "github_pat_",
+    "xoxb-",
+    "xoxp-",
+    "akia",
+    "-----begin ",
+)
 
 
 class BrowserContractError(ValueError):
@@ -134,9 +158,27 @@ def _schema(value: str) -> str:
     return value
 
 
+def _reject_secret_like(value: str, field_name: str) -> None:
+    lowered = value.strip().lower()
+    if lowered in _OBVIOUS_SECRET_LITERALS:
+        raise BrowserContractError(
+            f"{field_name} must not contain secret material."
+        )
+    if any(lowered.startswith(prefix) for prefix in _SECRET_VALUE_PREFIXES):
+        raise BrowserContractError(
+            f"{field_name} must not contain secret material."
+        )
+    compact = value.strip()
+    if len(compact) >= 48 and re.fullmatch(r"[0-9a-fA-F]+", compact):
+        raise BrowserContractError(
+            f"{field_name} must not contain key-like hex material."
+        )
+
+
 def _token(value: str, field_name: str, max_length: int = 128) -> str:
     if not isinstance(value, str):
         raise BrowserContractError(f"{field_name} must be a string.")
+    _reject_secret_like(value, field_name)
     normalized = value.strip().lower()
     if (
         not normalized
@@ -185,6 +227,43 @@ def _enums(
         raise BrowserContractError(f"{field_name} must be an array.")
     selected = {_enum(item, enum_type, field_name) for item in values}
     return tuple(item for item in enum_type if item in selected)
+
+
+def _credential_scope(value: str) -> str:
+    if not isinstance(value, str):
+        raise BrowserContractError("credential scope must be a string.")
+    reference = value.strip()
+    try:
+        provider_key, secret_key = parse_secret_reference(reference)
+    except SecretReferenceError as exc:
+        raise BrowserContractError(
+            "credential scopes must use secret://provider/key references."
+        ) from exc
+    if not _SECRET_PROVIDER_RE.fullmatch(provider_key):
+        raise BrowserContractError("Invalid credential scope provider key.")
+    if not _SECRET_KEY_RE.fullmatch(secret_key):
+        raise BrowserContractError("Invalid credential scope secret key.")
+    if any(part in {"", ".", ".."} for part in secret_key.split("/")):
+        raise BrowserContractError("Invalid credential scope path.")
+    return f"secret://{provider_key.lower()}/{secret_key}"
+
+
+def _credential_scopes(values: Iterable[str]) -> tuple[str, ...]:
+    if isinstance(values, (str, bytes)):
+        raise BrowserContractError("credential_scopes must be an array.")
+    return tuple(sorted({_credential_scope(item) for item in values}))
+
+
+def _version(value: str, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise BrowserContractError(f"{field_name} must be a string.")
+    normalized = value.strip()
+    _reject_secret_like(normalized, field_name)
+    if not _VERSION_RE.fullmatch(normalized):
+        raise BrowserContractError(
+            f"{field_name} must use a bounded version identifier grammar."
+        )
+    return normalized
 
 
 def _dt(value: datetime, field_name: str) -> datetime:
@@ -412,7 +491,7 @@ class BrowserRuntimeRequirements:
         object.__setattr__(
             self,
             "credential_scopes",
-            _tokens(self.credential_scopes, "credential_scopes"),
+            _credential_scopes(self.credential_scopes),
         )
         if (
             self.filesystem_mode is BrowserFilesystemMode.READ_ONLY_WORKSPACE
@@ -511,9 +590,12 @@ class BrowserExecutionSpec:
         )
 
         req = self.runtime_requirements
-        if req.network_mode is BrowserNetworkMode.NONE and origins:
+        if req.network_mode in {
+            BrowserNetworkMode.NONE,
+            BrowserNetworkMode.FIXTURE_ONLY,
+        } and origins:
             raise BrowserContractError(
-                "network_mode=none cannot request navigation origins."
+                "none/fixture_only network modes cannot request navigation origins."
             )
         if req.network_mode is BrowserNetworkMode.RESTRICTED_EXTERNAL and not origins:
             raise BrowserContractError(
@@ -630,7 +712,7 @@ class BrowserRuntimeAttestation:
                 object.__setattr__(
                     self,
                     name,
-                    _safe_text(getattr(self, name), name),
+                    _version(getattr(self, name), name),
                 )
         if self.network_policy_fingerprint is not None:
             object.__setattr__(
