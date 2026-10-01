@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -158,17 +157,14 @@ class BrowserRuntimeService:
         with tempfile.TemporaryDirectory(
             prefix="ai-council-browser-runtime-"
         ) as temporary:
-            script_path = Path(temporary) / "script.py"
+            script_root = Path(temporary)
+            script_path = script_root / "script.py"
             script_path.write_bytes(source_bytes)
-            try:
-                os.chmod(script_path, 0o444)
-            except OSError:
-                pass
 
             container_name = f"ai-council-{run_id}"
             command = self._build_docker_command(
                 spec=spec,
-                script_path=script_path,
+                script_root=script_root,
                 fixture_root=fixture,
                 image_ref=image.digest,
                 container_name=container_name,
@@ -239,6 +235,21 @@ class BrowserRuntimeService:
             )
             raise BrowserRuntimeProtocolError(
                 "Browser runtime output exceeded the configured limit.",
+                attestation=attestation,
+            )
+
+        if completed.returncode != 0 and not (completed.stdout or "").strip():
+            attestation = self._attestation(
+                spec=spec,
+                run_id=run_id,
+                image=image,
+                started=started,
+                finished=finished,
+                terminal_result=BrowserTerminalResult.FAILED,
+                failure_class="docker_run_failed",
+            )
+            raise BrowserRuntimeExecutionError(
+                "Browser runtime process failed before protocol output.",
                 attestation=attestation,
             )
 
@@ -479,7 +490,7 @@ class BrowserRuntimeService:
         self,
         *,
         spec: BrowserExecutionSpec,
-        script_path: Path,
+        script_root: Path,
         fixture_root: Path,
         image_ref: str,
         container_name: str,
@@ -520,7 +531,7 @@ class BrowserRuntimeService:
                 f"size={self.config.tmpfs_size_mb}m,mode=1777"
             ),
             "--mount",
-            f"type=bind,src={script_path},dst=/input/script.py,readonly",
+            f"type=bind,src={script_root},dst=/input,readonly",
             "--mount",
             f"type=bind,src={fixture_root},dst=/fixture,readonly",
             image_ref,
