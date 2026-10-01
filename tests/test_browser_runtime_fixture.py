@@ -218,6 +218,13 @@ def test_success_uses_digest_bound_network_none_container(
     assert all("dst=/input/script.py" not in value for value in mounts)
     assert any("dst=/fixture" in value for value in mounts)
 
+    source_mount = next(value for value in mounts if "dst=/input" in value)
+    source_prefix = "type=bind,src="
+    source_host_path = source_mount.split(",dst=/input", 1)[0][
+        len(source_prefix):
+    ]
+    assert Path(source_host_path).parent == fixture.parent
+
     stdin = str(kwargs["input"])
     assert json.loads(stdin)["input"] == raw_input
     assert raw_input["query"] not in " ".join(command)
