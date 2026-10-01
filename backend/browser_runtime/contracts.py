@@ -23,6 +23,9 @@ _SECRET_KEY_RE = re.compile(r"^[A-Za-z0-9._/-]{1,240}$")
 _OBVIOUS_SECRET_LITERALS = frozenset(
     {"hunter2", "password", "passwd", "secret", "changeme", "letmein"}
 )
+_OBVIOUS_SECRET_VALUES = frozenset(
+    {"hunter2", "changeme", "letmein"}
+)
 _SECRET_SIGNATURE_SUBSTRINGS = (
     "hunter2",
     "changeme",
@@ -191,7 +194,7 @@ def _reject_secret_like(value: str, field_name: str) -> None:
 
 def _reject_reference_value_like(value: str, field_name: str) -> None:
     lowered = value.strip().lower()
-    if lowered in _OBVIOUS_SECRET_LITERALS:
+    if lowered in _OBVIOUS_SECRET_VALUES:
         raise BrowserContractError(
             f"{field_name} must not contain a resolved sensitive value."
         )
