@@ -16,7 +16,7 @@ from backend.task_engine.governance import ExecutionInitiator
 
 BROWSER_CONTRACT_SCHEMA_VERSION = "arch-browser-contract-001.v1"
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
-_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]*$")
+_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _VERSION_RE = re.compile(r"^[0-9][0-9A-Za-z._+-]{0,47}$")
 _SECRET_PROVIDER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
 _SECRET_KEY_RE = re.compile(r"^[A-Za-z0-9._/-]{1,240}$")
@@ -39,6 +39,11 @@ _SECRET_VALUE_PREFIXES = (
     "xoxp-",
     "akia",
     "-----begin ",
+)
+_IDENTIFIER_SECRET_PREFIX_RE = re.compile(
+    r"^(?:password|passwd|authorization|bearer|cookie|set-cookie|sessionid|"
+    r"x[-_.]?api[-_.]?key|api[-_.]?key|private[-_.]?key|approval[-_.]?token)"
+    r"(?:[._-]).+"
 )
 
 
@@ -168,6 +173,10 @@ def _reject_secret_like(value: str, field_name: str) -> None:
         raise BrowserContractError(
             f"{field_name} must not contain secret material."
         )
+    if _IDENTIFIER_SECRET_PREFIX_RE.fullmatch(lowered):
+        raise BrowserContractError(
+            f"{field_name} must not contain credential-like material."
+        )
     compact = value.strip()
     if len(compact) >= 48 and re.fullmatch(r"[0-9a-fA-F]+", compact):
         raise BrowserContractError(
@@ -243,8 +252,11 @@ def _credential_scope(value: str) -> str:
         raise BrowserContractError("Invalid credential scope provider key.")
     if not _SECRET_KEY_RE.fullmatch(secret_key):
         raise BrowserContractError("Invalid credential scope secret key.")
-    if any(part in {"", ".", ".."} for part in secret_key.split("/")):
+    parts = secret_key.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
         raise BrowserContractError("Invalid credential scope path.")
+    for part in parts:
+        _reject_secret_like(part, "credential_scope_segment")
     return f"secret://{provider_key.lower()}/{secret_key}"
 
 
@@ -291,6 +303,9 @@ def _origin(value: str) -> str:
     except ValueError as exc:
         raise BrowserContractError("Invalid navigation origin port.") from exc
     host = parsed.hostname.lower()
+    for label in host.split("."):
+        if label:
+            _reject_secret_like(label, "navigation_origin_host_label")
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     default_port = 443 if parsed.scheme == "https" else 80
@@ -327,6 +342,7 @@ def _safe_text(value: str, field_name: str, max_length: int = 128) -> str:
     if not isinstance(value, str):
         raise BrowserContractError(f"{field_name} must be a string.")
     normalized = value.strip()
+    _reject_secret_like(normalized, field_name)
     if not normalized or len(normalized) > max_length or "\0" in normalized:
         raise BrowserContractError(f"Invalid {field_name}.")
     return normalized
