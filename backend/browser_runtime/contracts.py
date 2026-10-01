@@ -604,6 +604,20 @@ class BrowserExecutionSpec:
                 "restricted_external requires requested navigation origins."
             )
         if (
+            BrowserEffect.BROWSER_EXTERNAL_WRITE in effects
+            and req.network_mode is not BrowserNetworkMode.RESTRICTED_EXTERNAL
+        ):
+            raise BrowserContractError(
+                "browser_external_write requires restricted_external network mode."
+            )
+        if (
+            BrowserEffect.BROWSER_UPLOAD in effects
+            and req.network_mode is BrowserNetworkMode.NONE
+        ):
+            raise BrowserContractError(
+                "browser_upload requires fixture_only or restricted_external network mode."
+            )
+        if (
             BrowserEffect.BROWSER_DOWNLOAD in effects
             and req.download_policy is BrowserDownloadPolicy.DENY
         ):
