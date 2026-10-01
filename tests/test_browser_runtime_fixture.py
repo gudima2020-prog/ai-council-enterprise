@@ -292,7 +292,10 @@ def test_artifact_fingerprint_drift_rejected_before_docker(
             filesystem_mode=BrowserFilesystemMode.WORKSPACE_ONLY,
         ),
         requirements(browser_engine=BrowserEngine.FIREFOX),
-        requirements(download_policy=BrowserDownloadPolicy.WORKSPACE_ONLY),
+        requirements(
+            filesystem_mode=BrowserFilesystemMode.WORKSPACE_ONLY,
+            download_policy=BrowserDownloadPolicy.WORKSPACE_ONLY,
+        ),
         requirements(capture_screenshots=True),
     ),
 )
