@@ -38,11 +38,15 @@ _SECRET_SIGNATURE_SUBSTRINGS = (
     "akia",
     "-----begin ",
 )
-_SECRET_VALUE_SHAPE_RE = re.compile(
+_SENSITIVE_LEXEME_RE = re.compile(
     r"(?:password|passwd|authorization|bearer|cookie|set[-_.]?cookie|"
     r"sessionid|x[-_.]?api[-_.]?key|api[-_.]?key|private[-_.]?key|"
-    r"approval[-_.]?token)"
-    r"[-_.:=]+[a-z0-9][a-z0-9._-]{2,}",
+    r"approval[-_.]?token)",
+    re.IGNORECASE,
+)
+_SECRET_VALUE_SHAPE_RE = re.compile(
+    _SENSITIVE_LEXEME_RE.pattern
+    + r"[-_.:=]+[a-z0-9][a-z0-9._-]{2,}",
     re.IGNORECASE,
 )
 _LONG_HEX_CARRIER_RE = re.compile(r"[0-9a-fA-F]{48,}")
@@ -174,12 +178,32 @@ def _reject_secret_like(value: str, field_name: str) -> None:
         raise BrowserContractError(
             f"{field_name} must not contain embedded credential-like material."
         )
-    if _SECRET_VALUE_SHAPE_RE.search(lowered):
+    if _SENSITIVE_LEXEME_RE.search(lowered):
         raise BrowserContractError(
-            f"{field_name} must not contain credential-like value material."
+            f"{field_name} must not contain sensitive credential lexemes."
         )
     compact = value.strip()
     if _LONG_HEX_CARRIER_RE.search(compact):
+        raise BrowserContractError(
+            f"{field_name} must not contain key-like hex material."
+        )
+
+
+def _reject_reference_value_like(value: str, field_name: str) -> None:
+    lowered = value.strip().lower()
+    if lowered in _OBVIOUS_SECRET_LITERALS:
+        raise BrowserContractError(
+            f"{field_name} must not contain a resolved sensitive value."
+        )
+    if any(marker in lowered for marker in _SECRET_SIGNATURE_SUBSTRINGS):
+        raise BrowserContractError(
+            f"{field_name} must not contain embedded credential-like material."
+        )
+    if _SECRET_VALUE_SHAPE_RE.search(lowered):
+        raise BrowserContractError(
+            f"{field_name} must remain metadata-only, not a value carrier."
+        )
+    if _LONG_HEX_CARRIER_RE.search(value.strip()):
         raise BrowserContractError(
             f"{field_name} must not contain key-like hex material."
         )
@@ -251,14 +275,14 @@ def _credential_scope(value: str) -> str:
         ) from exc
     if not _SECRET_PROVIDER_RE.fullmatch(provider_key):
         raise BrowserContractError("Invalid credential scope provider key.")
-    _reject_secret_like(provider_key, "credential_scope_provider")
+    _reject_reference_value_like(provider_key, "credential_scope_provider")
     if not _SECRET_KEY_RE.fullmatch(secret_key):
         raise BrowserContractError("Invalid credential scope secret key.")
     parts = secret_key.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         raise BrowserContractError("Invalid credential scope path.")
     for part in parts:
-        _reject_secret_like(part, "credential_scope_segment")
+        _reject_reference_value_like(part, "credential_scope_segment")
     return f"secret://{provider_key.lower()}/{secret_key}"
 
 
