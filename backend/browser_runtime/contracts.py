@@ -26,20 +26,15 @@ _OBVIOUS_SECRET_LITERALS = frozenset(
 _OBVIOUS_SECRET_VALUES = frozenset(
     {"hunter2", "changeme", "letmein"}
 )
-_SECRET_SIGNATURE_SUBSTRINGS = (
-    "hunter2",
-    "changeme",
-    "letmein",
-    "sk-proj-",
-    "sk-live-",
-    "sk_test_",
-    "sk_live_",
-    "ghp_",
-    "github_pat_",
-    "xoxb-",
-    "xoxp-",
-    "akia",
-    "-----begin ",
+_SECRET_SIGNATURE_RE = re.compile(
+    r"(?:hunter2|changeme|letmein|"
+    r"sk[-_.](?:proj|live|test)[-_.][a-z0-9]{3,}|"
+    r"ghp[-_.][a-z0-9]{3,}|"
+    r"github[-_.]?pat[-_.][a-z0-9_]{3,}|"
+    r"xox[bp][-_.][a-z0-9-]{3,}|"
+    r"akia[a-z0-9]{8,}|"
+    r"-----begin[ -]+(?:[a-z0-9]+[ -]+)*private[ -]+key-----)",
+    re.IGNORECASE,
 )
 _SENSITIVE_LEXEME_RE = re.compile(
     r"(?:password|passwd|authorization|bearer|cookie|set[-_.]?cookie|"
@@ -177,7 +172,7 @@ def _reject_secret_like(value: str, field_name: str) -> None:
         raise BrowserContractError(
             f"{field_name} must not contain secret material."
         )
-    if any(marker in lowered for marker in _SECRET_SIGNATURE_SUBSTRINGS):
+    if _SECRET_SIGNATURE_RE.search(lowered):
         raise BrowserContractError(
             f"{field_name} must not contain embedded credential-like material."
         )
@@ -198,7 +193,7 @@ def _reject_reference_value_like(value: str, field_name: str) -> None:
         raise BrowserContractError(
             f"{field_name} must not contain a resolved sensitive value."
         )
-    if any(marker in lowered for marker in _SECRET_SIGNATURE_SUBSTRINGS):
+    if _SECRET_SIGNATURE_RE.search(lowered):
         raise BrowserContractError(
             f"{field_name} must not contain embedded credential-like material."
         )
