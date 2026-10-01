@@ -23,12 +23,10 @@ _SECRET_KEY_RE = re.compile(r"^[A-Za-z0-9._/-]{1,240}$")
 _OBVIOUS_SECRET_LITERALS = frozenset(
     {"hunter2", "password", "passwd", "secret", "changeme", "letmein"}
 )
-_SECRET_VALUE_PREFIXES = (
-    "authorization:",
-    "cookie:",
-    "set-cookie:",
-    "sessionid:",
-    "approval-token-",
+_SECRET_SIGNATURE_SUBSTRINGS = (
+    "hunter2",
+    "changeme",
+    "letmein",
     "sk-proj-",
     "sk-live-",
     "sk_test_",
@@ -40,11 +38,14 @@ _SECRET_VALUE_PREFIXES = (
     "akia",
     "-----begin ",
 )
-_IDENTIFIER_SECRET_PREFIX_RE = re.compile(
-    r"^(?:password|passwd|authorization|bearer|cookie|set-cookie|sessionid|"
-    r"x[-_.]?api[-_.]?key|api[-_.]?key|private[-_.]?key|approval[-_.]?token)"
-    r"(?:[._-]).+"
+_SECRET_VALUE_SHAPE_RE = re.compile(
+    r"(?:password|passwd|authorization|bearer|cookie|set[-_.]?cookie|"
+    r"sessionid|x[-_.]?api[-_.]?key|api[-_.]?key|private[-_.]?key|"
+    r"approval[-_.]?token)"
+    r"[-_.:=]+[a-z0-9][a-z0-9._-]{2,}",
+    re.IGNORECASE,
 )
+_LONG_HEX_CARRIER_RE = re.compile(r"[0-9a-fA-F]{48,}")
 
 
 class BrowserContractError(ValueError):
@@ -169,16 +170,16 @@ def _reject_secret_like(value: str, field_name: str) -> None:
         raise BrowserContractError(
             f"{field_name} must not contain secret material."
         )
-    if any(lowered.startswith(prefix) for prefix in _SECRET_VALUE_PREFIXES):
+    if any(marker in lowered for marker in _SECRET_SIGNATURE_SUBSTRINGS):
         raise BrowserContractError(
-            f"{field_name} must not contain secret material."
+            f"{field_name} must not contain embedded credential-like material."
         )
-    if _IDENTIFIER_SECRET_PREFIX_RE.fullmatch(lowered):
+    if _SECRET_VALUE_SHAPE_RE.search(lowered):
         raise BrowserContractError(
-            f"{field_name} must not contain credential-like material."
+            f"{field_name} must not contain credential-like value material."
         )
     compact = value.strip()
-    if len(compact) >= 48 and re.fullmatch(r"[0-9a-fA-F]+", compact):
+    if _LONG_HEX_CARRIER_RE.search(compact):
         raise BrowserContractError(
             f"{field_name} must not contain key-like hex material."
         )
