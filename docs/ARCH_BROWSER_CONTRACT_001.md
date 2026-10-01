@@ -262,6 +262,10 @@ A constructor that rejects a carrier must fail before `to_dict()` can expose
 that value. Canonical serialization/fingerprinting therefore operates only on
 already-validated contract state.
 
+`fingerprint_input()` may hash arbitrary caller input, but the Browser
+contracts retain only the resulting SHA-256 fingerprint. The raw input payload
+is not a serializable field of these contract dataclasses.
+
 ## Trust-boundary interpretation
 
 Requested requirements such as capability, origin, credential scope, effect,
