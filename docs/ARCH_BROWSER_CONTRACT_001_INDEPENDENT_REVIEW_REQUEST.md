@@ -88,11 +88,12 @@ Independently verify all of the following, not merely by trusting existing tests
 5. Execution requirements contain no allow/grant/approval result.
 6. Effect declarations do not create grants.
 7. Requested origins do not become network authority.
-8. Requested credential scopes contain identifiers only and do not create
-   credential access.
+8. Requested credential scopes are metadata-only secret references and do not
+   create credential access.
 9. BrowserRuntimeRequirements cannot disable ephemeral runtime.
 10. BrowserRuntimeRequirements cannot disable fresh browser session.
-11. Contradictory download/filesystem/network declarations fail closed.
+11. Contradictory download/filesystem/network declarations fail closed,
+    including external-write with none/fixture_only and upload with none.
 12. Navigation origins reject embedded username/password, paths, queries,
     fragments, and unsupported schemes.
 13. Evidence relative paths reject traversal.
@@ -130,6 +131,8 @@ Answer explicitly:
 - Can a script fingerprint authorize execution?
 - Can a requested origin authorize network access?
 - Can an effect declaration grant a browser capability?
+- Can browser_external_write coexist with none or fixture_only network mode?
+- Can browser_upload coexist with network mode none?
 - Can a credential scope string disclose or grant a credential?
 - Can RuntimeAttestation be interpreted as an ALLOW result?
 - Can EvidenceManifest prove task correctness by itself?
