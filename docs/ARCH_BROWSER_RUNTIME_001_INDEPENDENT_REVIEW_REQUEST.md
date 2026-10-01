@@ -71,6 +71,7 @@ Inspect exact command construction.
 Confirm:
 
 - `shell=False`;
+- `--interactive` so the exact bound stdin payload reaches the container;
 - `--network=none`;
 - `--read-only`;
 - `--ipc=none`;
@@ -92,7 +93,9 @@ Verify the configured image tag is first resolved to an image digest, labels are
 verified **on that digest**, and `docker run` executes the digest rather than
 the mutable tag.
 
-Look specifically for tag/label/run TOCTOU.
+Look specifically for tag/label/run TOCTOU. The explicit preparation/smoke gate
+must also resolve the tag to an image digest, verify labels on that digest and
+run the smoke container by digest rather than by mutable tag.
 
 ### D. Timeout/cleanup
 
@@ -114,6 +117,8 @@ Confirm:
 - worker metadata is emitted before user code import/execution;
 - untrusted script stdout/stderr cannot become the trusted runner protocol;
 - extra/malformed protocol bytes fail closed;
+- the runner actually receives the stdin JSON payload through Docker rather
+  than EOF (the smoke/runtime command must preserve stdin);
 - untrusted result is treated as untrusted task output, not authority;
 - raw exception text is not emitted in the protocol;
 - result size is bounded.
