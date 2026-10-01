@@ -124,6 +124,51 @@ Independently verify all of the following, not merely by trusting existing tests
 32. No Skill Registry, Skill Factory, auto-promotion, or RUN/ADAPT/SKIP runtime
     behavior is implemented in this slice.
 
+## Focused B1 remediation acceptance checklist
+
+The reviewer must treat B1 as a complete serializable-surface audit, not as a
+check of only the previously reported examples.
+
+Acceptance requires all of the following:
+
+1. Inventory every serialized string field reachable from:
+   `BrowserProvenanceRef`, `BrowserScriptArtifact`,
+   `BrowserRuntimeRequirements`, `BrowserExecutionSpec`,
+   `BrowserRuntimeAttestation`, `BrowserEvidenceItem`, and
+   `BrowserEvidenceManifest`.
+2. Classify each field as exactly one of:
+   fixed vocabulary, typed digest/fingerprint, public identifier, version
+   identifier, canonical relative path/logical identifier, requested origin, or
+   protected `secret://provider/key` reference.
+3. Confirm there is no serialized arbitrary free-text field and no field that
+   bypasses its class validator before `to_dict()`.
+4. Confirm public identifiers reject delimiter-shaped carrier strings and
+   common header/key/password-like prefixes rather than relying on one
+   field-specific check.
+5. Re-run the R3 generic-identifier probes against at least:
+   artifact ID, Task ID, Workspace ID, requested capability, requested evidence,
+   runtime provider, failure class, evidence ID/type, and logical key.
+6. Confirm a value-shaped protected token cannot be embedded as the key portion
+   of a `secret://provider/key` scope, while ordinary metadata key names remain
+   valid.
+7. Confirm a value-shaped sensitive token cannot be embedded in an origin host
+   label and survive canonicalization.
+8. Confirm path/entrypoint segments continue to use segment-level carrier
+   rejection.
+9. Confirm browser/runtime version fields remain narrow identifiers, not generic
+   text.
+10. Confirm typed SHA-256 fields remain valid and are not accidentally rejected
+    merely because they are high-entropy hexadecimal strings.
+11. Confirm rejected objects cannot be serialized or fingerprinted because
+    construction fails first.
+12. Confirm the remediation adds no resolver, grant, authorization, network
+    execution, browser launch, dependency, migration, or Skill runtime.
+13. Confirm all B2 effect/network contradiction tests remain fail-closed.
+14. Run the mandatory suites independently and report exact counts.
+
+A PASS requires both: (a) the focused adversarial probes fail closed and
+(b) source inspection shows no unclassified serializable string surface.
+
 ## Security questions
 
 Answer explicitly:
