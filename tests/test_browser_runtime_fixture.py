@@ -375,6 +375,11 @@ def test_side_effect_profiles_fail_before_docker(
             if effect is BrowserEffect.BROWSER_EXTERNAL_WRITE
             else BrowserNetworkMode.FIXTURE_ONLY
         ),
+        filesystem_mode=(
+            BrowserFilesystemMode.WORKSPACE_ONLY
+            if effect is BrowserEffect.BROWSER_DOWNLOAD
+            else BrowserFilesystemMode.READ_ONLY_WORKSPACE
+        ),
         download_policy=(
             BrowserDownloadPolicy.WORKSPACE_ONLY
             if effect is BrowserEffect.BROWSER_DOWNLOAD
