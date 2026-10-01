@@ -155,11 +155,12 @@ class BrowserRuntimeService:
         started = datetime.now(timezone.utc)
 
         staging_parent = fixture.parent
-        with tempfile.TemporaryDirectory(
-            prefix="ai-council-browser-runtime-",
-            dir=staging_parent,
-        ) as temporary:
-            script_root = Path(temporary)
+        script_root = (
+            staging_parent
+            / f".ai-council-browser-runtime-{uuid4().hex}"
+        )
+        script_root.mkdir(mode=self._staging_directory_mode())
+        try:
             script_path = script_root / "script.py"
             script_path.write_bytes(source_bytes)
 
@@ -221,6 +222,15 @@ class BrowserRuntimeService:
                 raise BrowserRuntimeExecutionError(
                     "Browser runtime timed out.",
                     attestation=attestation,
+                ) from exc
+        finally:
+            try:
+                shutil.rmtree(script_root)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise BrowserRuntimeExecutionError(
+                    "Browser runtime source staging cleanup failed."
                 ) from exc
 
         finished = datetime.now(timezone.utc)
@@ -487,6 +497,14 @@ class BrowserRuntimeService:
                 "Trusted BrowserRuntime image is unavailable."
             )
         return (completed.stdout or "").strip()
+
+    @staticmethod
+    def _staging_directory_mode(platform_name: str = os.name) -> int:
+        # Python 3.13+ applies a restrictive Windows ACL specifically for
+        # mode 0o700. Docker Desktop cannot read such a staging directory.
+        # Any other mode is ignored by Windows mkdir and therefore inherits
+        # the parent ACL. POSIX keeps the restrictive 0o700 behavior.
+        return 0o755 if platform_name == "nt" else 0o700
 
     def _build_docker_command(
         self,
