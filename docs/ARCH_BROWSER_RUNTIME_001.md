@@ -102,8 +102,16 @@ The execution command is shell-free and includes:
 
 Only two bind mounts are supplied:
 
-- exact frozen script source → `/input/script.py`, read-only;
+- a transient host directory containing only the exact frozen `script.py` →
+  `/input`, read-only;
 - deterministic fixture root → `/fixture`, read-only.
+
+The source is written before container creation and its directory is mounted
+read-only. The runtime deliberately mounts the directory rather than an
+individual Windows temp file because Docker Desktop may reject direct file bind
+mounts from the user's temporary directory with a host `CreateFile ... Access
+is denied` error. No permission/grant semantics are changed by this portability
+fix.
 
 There is no host workspace write mount, Docker socket mount, browser profile,
 cookie jar, credential mount or secret environment variable.
