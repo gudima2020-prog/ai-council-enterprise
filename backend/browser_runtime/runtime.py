@@ -162,10 +162,13 @@ class BrowserRuntimeService:
             except OSError:
                 pass
 
+            container_name = f"ai-council-{run_id}"
             command = self._build_docker_command(
                 spec=spec,
                 script_path=script_path,
                 fixture_root=fixture,
+                image_ref=image.digest,
+                container_name=container_name,
             )
             stdin_payload = canonical_json(
                 {
@@ -191,6 +194,7 @@ class BrowserRuntimeService:
                     "Docker CLI is unavailable."
                 ) from exc
             except subprocess.TimeoutExpired as exc:
+                self._force_remove_container(container_name)
                 finished = datetime.now(timezone.utc)
                 attestation = self._attestation(
                     spec=spec,
@@ -381,10 +385,22 @@ class BrowserRuntimeService:
         return root
 
     def _inspect_trusted_image(self) -> _TrustedImage:
-        labels = self._docker_text(
+        digest = self._docker_text(
             "image",
             "inspect",
             self.config.image,
+            "--format",
+            "{{.Id}}",
+        ).strip().lower()
+        if not _IMAGE_ID_RE.fullmatch(digest):
+            raise BrowserRuntimeImageError(
+                "Browser runtime image digest is invalid."
+            )
+
+        labels = self._docker_text(
+            "image",
+            "inspect",
+            digest,
             "--format",
             "{{json .Config.Labels}}",
         )
@@ -409,18 +425,6 @@ class BrowserRuntimeService:
         ):
             raise BrowserRuntimeImageError(
                 "Browser runtime image version label mismatch."
-            )
-
-        digest = self._docker_text(
-            "image",
-            "inspect",
-            self.config.image,
-            "--format",
-            "{{.Id}}",
-        ).strip().lower()
-        if not _IMAGE_ID_RE.fullmatch(digest):
-            raise BrowserRuntimeImageError(
-                "Browser runtime image digest is invalid."
             )
         return _TrustedImage(digest=digest)
 
@@ -456,6 +460,8 @@ class BrowserRuntimeService:
         spec: BrowserExecutionSpec,
         script_path: Path,
         fixture_root: Path,
+        image_ref: str,
+        container_name: str,
     ) -> list[str]:
         req = spec.runtime_requirements
         memory = f"{req.max_memory_mb}m"
@@ -463,6 +469,8 @@ class BrowserRuntimeService:
             self.config.docker_binary,
             "run",
             "--rm",
+            "--name",
+            container_name,
             "--pull=never",
             "--network=none",
             "--ipc=none",
@@ -493,7 +501,7 @@ class BrowserRuntimeService:
             f"type=bind,src={script_path},dst=/input/script.py,readonly",
             "--mount",
             f"type=bind,src={fixture_root},dst=/fixture,readonly",
-            self.config.image,
+            image_ref,
             "--script",
             "/input/script.py",
             "--fixture-root",
@@ -501,6 +509,26 @@ class BrowserRuntimeService:
             "--max-result-bytes",
             str(self.config.output_limit_bytes),
         ]
+
+    def _force_remove_container(self, container_name: str) -> None:
+        try:
+            subprocess.run(
+                [
+                    self.config.docker_binary,
+                    "rm",
+                    "--force",
+                    container_name,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+                check=False,
+                shell=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
 
     def _parse_runner_output(self, raw: str) -> dict[str, Any]:
         stripped = raw.strip()
