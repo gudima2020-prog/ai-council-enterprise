@@ -534,6 +534,120 @@ def test_reference_and_origin_surfaces_reject_value_shaped_carriers() -> None:
         )
 
 
+def test_embedded_wrapped_carriers_fail_closed_across_validator_classes() -> None:
+    artifact = script_artifact()
+    now = datetime.now(timezone.utc)
+
+    wrapped_signature = "prefix-" + "sk-" + "proj-abc123"
+    wrapped_password = "prefix-" + "password" + "-abc123"
+
+    with pytest.raises(BrowserContractError):
+        BrowserRuntimeRequirements(
+            credential_scopes=(
+                "secret://" + wrapped_signature + "/metadata",
+            ),
+        )
+
+    with pytest.raises(BrowserContractError):
+        BrowserRuntimeRequirements(
+            credential_scopes=(
+                "secret://env/" + wrapped_signature,
+            ),
+        )
+
+    with pytest.raises(BrowserContractError):
+        execution_spec(
+            requirements=runtime_requirements(
+                network_mode=BrowserNetworkMode.RESTRICTED_EXTERNAL,
+            ),
+            origins=("https://" + wrapped_signature + ".example.com",),
+        )
+
+    with pytest.raises(BrowserContractError):
+        execution_spec(
+            requirements=runtime_requirements(
+                network_mode=BrowserNetworkMode.RESTRICTED_EXTERNAL,
+            ),
+            origins=(
+                "https://" + "password" + "=abc123.example.com",
+            ),
+        )
+
+    for field_name in ("browser_version", "automation_runtime_version"):
+        kwargs = dict(
+            task_id="task-001",
+            revision_id="rev-browser-001",
+            run_id="run-001",
+            script_artifact_fingerprint=artifact.fingerprint,
+            input_fingerprint=fingerprint_input({"query": "status"}),
+            runtime_provider="docker-worker",
+            browser_engine="chromium",
+            started_at=now,
+            finished_at=now,
+            terminal_result="completed",
+        )
+        kwargs[field_name] = "1-" + "sk-" + "proj-abc123"
+        with pytest.raises(BrowserContractError):
+            BrowserRuntimeAttestation(**kwargs)
+
+    with pytest.raises(BrowserContractError):
+        replace(
+            artifact,
+            entrypoint="browser/" + "password" + "=abc123.txt",
+        )
+
+    with pytest.raises(BrowserContractError):
+        evidence_item(
+            location="runs/" + "api_key" + "=abc123.txt",
+        )
+
+    with pytest.raises(BrowserContractError):
+        replace(
+            artifact,
+            artifact_id=wrapped_signature,
+        )
+
+    with pytest.raises(BrowserContractError):
+        replace(
+            artifact,
+            artifact_id=wrapped_password,
+        )
+
+
+def test_wrapped_long_hex_carriers_rejected_but_typed_digests_remain_valid() -> None:
+    wrapped = "prefix-" + ("a" * 64)
+
+    with pytest.raises(BrowserContractError):
+        replace(
+            script_artifact(),
+            artifact_id=wrapped,
+        )
+
+    digest_value = "a" * 64
+    artifact = replace(
+        script_artifact(),
+        source_sha256=digest_value,
+    )
+    assert artifact.source_sha256 == digest_value
+    assert len(artifact.fingerprint) == 64
+
+
+def test_reference_metadata_names_remain_valid_after_carrier_hardening() -> None:
+    requirements = BrowserRuntimeRequirements(
+        credential_scopes=(
+            "secret://env/OPENAI_API_KEY",
+            "secret://windows-dpapi/browser/account-a",
+            "secret://vault/PASSWORD",
+        )
+    )
+
+    assert requirements.credential_scopes == (
+        "secret://env/OPENAI_API_KEY",
+        "secret://vault/PASSWORD",
+        "secret://windows-dpapi/browser/account-a",
+    )
+
+
 def test_reference_metadata_names_remain_valid() -> None:
     requirements = BrowserRuntimeRequirements(
         credential_scopes=(
