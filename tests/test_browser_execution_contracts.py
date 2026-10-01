@@ -224,7 +224,7 @@ def test_effect_declarations_do_not_create_grants() -> None:
     requirements = runtime_requirements(
         network_mode=BrowserNetworkMode.RESTRICTED_EXTERNAL,
         download_policy=BrowserDownloadPolicy.WORKSPACE_ONLY,
-        credential_scopes=("vault.browser.account-a",),
+        credential_scopes=("secret://windows-dpapi/browser/account-a",),
     )
     spec = execution_spec(
         requirements=requirements,
@@ -239,7 +239,7 @@ def test_effect_declarations_do_not_create_grants() -> None:
 
     payload = spec.to_dict()
     assert payload["runtime_requirements"]["credential_scopes"] == [
-        "vault.browser.account-a"
+        "secret://windows-dpapi/browser/account-a"
     ]
     assert "granted_capabilities" not in payload
     assert "credential_values" not in payload
@@ -283,6 +283,14 @@ def test_runtime_requirements_fail_closed_on_contradictions() -> None:
 
     with pytest.raises(BrowserContractError):
         execution_spec(
+            requirements=runtime_requirements(
+                network_mode=BrowserNetworkMode.FIXTURE_ONLY,
+            ),
+            origins=("https://fixture.example",),
+        )
+
+    with pytest.raises(BrowserContractError):
+        execution_spec(
             effects=(BrowserEffect.BROWSER_DOWNLOAD,),
         )
 
@@ -296,13 +304,13 @@ def test_credential_scope_is_request_only_and_must_match_effect() -> None:
     with pytest.raises(BrowserContractError):
         execution_spec(
             requirements=runtime_requirements(
-                credential_scopes=("vault.browser.account-a",),
+                credential_scopes=("secret://windows-dpapi/browser/account-a",),
             ),
         )
 
     spec = execution_spec(
         requirements=runtime_requirements(
-            credential_scopes=("vault.browser.account-a",),
+            credential_scopes=("secret://windows-dpapi/browser/account-a",),
         ),
         effects=(
             BrowserEffect.BROWSER_READ,
@@ -310,7 +318,7 @@ def test_credential_scope_is_request_only_and_must_match_effect() -> None:
         ),
     )
     assert spec.runtime_requirements.credential_scopes == (
-        "vault.browser.account-a",
+        "secret://windows-dpapi/browser/account-a",
     )
 
 
