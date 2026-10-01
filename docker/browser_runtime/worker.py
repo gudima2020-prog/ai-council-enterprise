@@ -94,9 +94,11 @@ def write_result(
 
 
 async def execute(args: argparse.Namespace, raw_input: Any) -> None:
-    result_path = Path(args.result_path)
-    if not str(result_path).startswith("/tmp/"):
-        raise WorkerError("result_path_invalid")
+    result_path = Path(args.result_path).resolve()
+    try:
+        result_path.relative_to(Path("/tmp").resolve())
+    except ValueError as exc:
+        raise WorkerError("result_path_invalid") from exc
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
