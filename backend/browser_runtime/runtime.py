@@ -154,8 +154,10 @@ class BrowserRuntimeService:
         run_id = f"browser-run-{uuid4().hex}"
         started = datetime.now(timezone.utc)
 
+        staging_parent = fixture.parent
         with tempfile.TemporaryDirectory(
-            prefix="ai-council-browser-runtime-"
+            prefix="ai-council-browser-runtime-",
+            dir=staging_parent,
         ) as temporary:
             script_root = Path(temporary)
             script_path = script_root / "script.py"
