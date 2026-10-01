@@ -81,7 +81,9 @@ Confirm:
 - memory swap does not exceed memory;
 - numeric non-root user;
 - writable tmpfs only;
-- script mount read-only;
+- source staging directory contains only the exact frozen `script.py`;
+- source staging directory is mounted read-only at `/input`;
+- no individual writable source-file bind is used;
 - fixture mount read-only;
 - no host workspace write mount;
 - no Docker socket;
@@ -103,6 +105,11 @@ Confirm the container has a unique per-run name and timeout triggers explicit
 forced removal.
 
 Check that timeout does not silently retry or fall back to host execution.
+
+On Windows, specifically verify the real service path succeeds with the
+transient source **directory** bind. A direct single-file bind from the user's
+Temp directory previously produced Docker daemon return code 125 with
+`CreateFile ... Access is denied`; regression to that behavior is a blocker.
 
 ### E. Trusted runner vs untrusted script
 
