@@ -129,9 +129,18 @@ trusted runtime operation through the existing Secret Management boundary.
 
 Contradictory combinations fail closed. Examples include read-only workspace
 with workspace download, network mode none or fixture_only with requested
-origins, restricted external network with no requested origin, browser-download
-effect with deny download policy, and secret-use effects/scopes that do not
-match.
+origins, restricted external network with no requested origin,
+browser_external_write without restricted_external network mode,
+browser_upload with network mode none, browser-download effect with deny
+download policy, and secret-use effects/scopes that do not match.
+
+Effect/network semantics are explicit:
+- browser_external_write requires restricted_external plus an explicit requested
+  navigation origin;
+- browser_upload requires either fixture_only or restricted_external;
+- fixture_only upload is limited to the future controlled local fixture surface
+  and does not create external network authority;
+- none permits neither external write nor upload.
 
 ### BrowserRuntimeAttestation
 
