@@ -291,6 +291,34 @@ def test_runtime_requirements_fail_closed_on_contradictions() -> None:
 
     with pytest.raises(BrowserContractError):
         execution_spec(
+            effects=(BrowserEffect.BROWSER_EXTERNAL_WRITE,),
+        )
+
+    with pytest.raises(BrowserContractError):
+        execution_spec(
+            requirements=runtime_requirements(
+                network_mode=BrowserNetworkMode.FIXTURE_ONLY,
+            ),
+            effects=(BrowserEffect.BROWSER_EXTERNAL_WRITE,),
+        )
+
+    with pytest.raises(BrowserContractError):
+        execution_spec(
+            effects=(BrowserEffect.BROWSER_UPLOAD,),
+        )
+
+    fixture_upload = execution_spec(
+        requirements=runtime_requirements(
+            network_mode=BrowserNetworkMode.FIXTURE_ONLY,
+        ),
+        effects=(BrowserEffect.BROWSER_UPLOAD,),
+    )
+    assert fixture_upload.runtime_requirements.network_mode is (
+        BrowserNetworkMode.FIXTURE_ONLY
+    )
+
+    with pytest.raises(BrowserContractError):
+        execution_spec(
             effects=(BrowserEffect.BROWSER_DOWNLOAD,),
         )
 
