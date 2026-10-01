@@ -214,7 +214,8 @@ def test_success_uses_digest_bound_network_none_container(
     ]
     assert len(mounts) == 2
     assert all(value.endswith(",readonly") for value in mounts)
-    assert any("dst=/input/script.py" in value for value in mounts)
+    assert any("dst=/input" in value for value in mounts)
+    assert all("dst=/input/script.py" not in value for value in mounts)
     assert any("dst=/fixture" in value for value in mounts)
 
     stdin = str(kwargs["input"])
@@ -580,6 +581,39 @@ def test_malformed_runner_protocol_fails_closed(
             raw_input=raw_input,
             fixture_root=fixture_root(tmp_path),
         )
+
+
+def test_docker_failure_without_protocol_returns_failed_attestation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    stub = RunStub(
+        subprocess.CompletedProcess(
+            ["docker", "run"],
+            125,
+            stdout="",
+            stderr="docker daemon rejected bind mount",
+        )
+    )
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.subprocess.run",
+        stub,
+    )
+
+    with pytest.raises(BrowserRuntimeExecutionError) as exc_info:
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=spec(raw_input),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+    attestation = exc_info.value.attestation
+    assert attestation is not None
+    assert attestation.terminal_result.value == "failed"
+    assert attestation.failure_class == "docker_run_failed"
 
 
 def test_nonzero_runner_exit_is_failed_attestation(
