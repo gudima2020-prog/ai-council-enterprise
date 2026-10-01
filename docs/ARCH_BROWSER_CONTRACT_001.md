@@ -191,6 +191,77 @@ BrowserExecutionSpec, RuntimeAttestation, and EvidenceManifest.
 
 Unknown schema versions fail closed.
 
+## B1 non-sensitive-carrier contract
+
+The B1 remediation is contract-wide. It is not defined as a finite list of
+individual examples.
+
+Every serialized string field in this slice must belong to one of these
+validator classes:
+
+1. **fixed vocabulary** — schema versions and enums;
+2. **typed digest/fingerprint** — exact SHA-256 values validated by the digest
+   grammar;
+3. **public identifier** — generic IDs/tokens use a bounded public-identifier
+   grammar with no colon, equals sign, slash, whitespace, or arbitrary free
+   text, and pass the common sensitive-carrier rejection policy;
+4. **version identifier** — bounded version grammar plus the same carrier
+   rejection policy;
+5. **relative path/logical identifier** — canonical workspace-relative form,
+   with segment-level carrier rejection;
+6. **requested origin** — structural http(s) origin parsing plus host-label
+   carrier rejection; the origin is requirements-only and never authority;
+7. **protected scope reference** — only the existing
+   `secret://provider/key` metadata form, with each key segment checked so
+   value-shaped sensitive material cannot be embedded in the reference.
+
+Typed cryptographic digests are not treated as generic identifiers. A
+64-character SHA-256 field is allowed only where the schema explicitly declares
+a digest/fingerprint field.
+
+The current serializable surfaces are classified as follows:
+
+~~~text
+public identifiers:
+  provenance source_kind/source_id/source_revision
+  artifact_id / revision_id
+  task_id / revision_id / workspace_id / run_id
+  requested_capabilities / requested_evidence
+  runtime_provider / failure_class
+  evidence_id / evidence_type / logical_key
+
+typed digests:
+  source_sha256
+  script/input fingerprints
+  runtime image digest
+  network/governance policy fingerprints
+  evidence sha256
+  contract fingerprints
+
+version identifiers:
+  browser_version
+  automation_runtime_version
+
+paths:
+  script entrypoint
+  relative evidence location
+
+origins:
+  requested_navigation_origins
+
+protected references:
+  credential_scopes
+~~~
+
+No serialized dataclass field is intended to be an unclassified arbitrary
+free-text carrier. A future field that needs free text requires an explicit
+privacy/redaction contract and cannot silently reuse the public-identifier
+validator.
+
+A constructor that rejects a carrier must fail before `to_dict()` can expose
+that value. Canonical serialization/fingerprinting therefore operates only on
+already-validated contract state.
+
 ## Trust-boundary interpretation
 
 Requested requirements such as capability, origin, credential scope, effect,
