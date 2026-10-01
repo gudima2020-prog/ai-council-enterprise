@@ -178,12 +178,14 @@ def test_success_uses_digest_bound_network_none_container(
         stub,
     )
 
+    fixture = fixture_root(tmp_path)
+
     result = BrowserRuntimeService().execute(
         artifact=artifact(),
         spec=spec(raw_input),
         source_bytes=SOURCE,
         raw_input=raw_input,
-        fixture_root=fixture_root(tmp_path),
+        fixture_root=fixture,
     )
 
     assert result.result == {"status": "ready"}
