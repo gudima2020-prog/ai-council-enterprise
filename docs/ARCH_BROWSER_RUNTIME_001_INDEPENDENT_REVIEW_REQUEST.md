@@ -107,11 +107,15 @@ forced removal.
 Check that timeout does not silently retry or fall back to host execution.
 
 On Windows, specifically verify the real service path succeeds with the
-transient source **directory** bind created beside the validated fixture root,
-not under the user's Temp tree. Earlier candidates failed with Docker daemon
-return code 125 for both a direct Temp-file bind (`CreateFile ... Access is
-denied`) and a Temp-directory bind (generic `Access is denied`). Regression to
-either Temp-based staging path or either failure mode is a blocker.
+transient source **directory** bind created beside the validated fixture root.
+The staging directory must not be created by `tempfile.mkdtemp` /
+`TemporaryDirectory`: Python 3.13+ applies a restrictive ACL for Windows
+`mkdir(..., 0o700)`, which can prevent Docker Desktop from reading the bind
+source. Verify the implementation uses a non-`0o700` Windows mkdir mode so the
+project parent ACL is inherited, uses `0o700` on POSIX, mounts the staging
+directory read-only, removes it after execution, and fails closed if cleanup
+fails. Earlier candidates produced Docker daemon return code 125 /
+`Access is denied`; regression to that behavior is a blocker.
 
 ### E. Trusted runner vs untrusted script
 
