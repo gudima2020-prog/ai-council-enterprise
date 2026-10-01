@@ -115,16 +115,23 @@ Describes provider-neutral runtime requirements:
 - download policy;
 - runtime, memory, and PID ceilings;
 - screenshot-capture requirement;
-- credential scope identifiers only.
+- credential scope references only.
 
-Credential scopes are requests only. No secret value, credential material,
-cookie, authorization header, API key, approval token, or password is part of
-this contract.
+Credential scopes are requests only and must use the existing metadata-only
+`secret://provider/key` reference form. Raw credential values are not accepted
+as credential scopes. Runtime/browser version fields also use a narrow bounded
+version grammar rather than arbitrary text. Generic identifier fields reject
+common credential/header/token/key encodings before serialization.
+
+The contract therefore carries secret references or aliases only, never a
+runtime-resolved secret value. Actual secret resolution remains a future
+trusted runtime operation through the existing Secret Management boundary.
 
 Contradictory combinations fail closed. Examples include read-only workspace
-with workspace download, network mode none with requested origins, restricted
-external network with no requested origin, browser-download effect with deny
-download policy, and secret-use effects/scopes that do not match.
+with workspace download, network mode none or fixture_only with requested
+origins, restricted external network with no requested origin, browser-download
+effect with deny download policy, and secret-use effects/scopes that do not
+match.
 
 ### BrowserRuntimeAttestation
 
@@ -184,7 +191,8 @@ Artifact identity such as source SHA-256, script fingerprint, and input
 fingerprint binds exact content but grants no permission.
 
 Observed facts such as runtime attestation, evidence hashes, and terminal
-result are provenance/evidence only.
+result are provenance/evidence only. Attestation version metadata is restricted
+to normalized version identifiers and is not a general free-text carrier.
 
 Future authorization is not implemented here. A later enforcement slice must
 independently bind exact Task/revision/script/input to Tool Registry, Workspace
