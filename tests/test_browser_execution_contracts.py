@@ -414,6 +414,139 @@ def test_attestation_versions_reject_raw_secret_material(
         )
 
 
+@pytest.mark.parametrize(
+    "carrier",
+    (
+        "password" + ":abc123",
+        "x-api-key" + ":abc123",
+        "api-key" + ":abc123",
+        "bearer" + ":abc123",
+        "password" + "-abc123",
+        "bearer" + "-abc123",
+    ),
+)
+def test_generic_identifier_surfaces_reject_credential_carriers(
+    carrier: str,
+) -> None:
+    artifact = script_artifact()
+    spec = execution_spec()
+
+    with pytest.raises(BrowserContractError):
+        replace(artifact, artifact_id=carrier)
+
+    with pytest.raises(BrowserContractError):
+        replace(artifact, revision_id=carrier)
+
+    with pytest.raises(BrowserContractError):
+        BrowserProvenanceRef(
+            source_kind="task",
+            source_id=carrier,
+        )
+
+    with pytest.raises(BrowserContractError):
+        replace(spec, task_id=carrier)
+
+    with pytest.raises(BrowserContractError):
+        replace(spec, workspace_id=carrier)
+
+    with pytest.raises(BrowserContractError):
+        replace(spec, requested_capabilities=(carrier,))
+
+    with pytest.raises(BrowserContractError):
+        replace(spec, requested_evidence=(carrier,))
+
+    with pytest.raises(BrowserContractError):
+        evidence_item(evidence_id=carrier)
+
+    with pytest.raises(BrowserContractError):
+        BrowserEvidenceItem(
+            evidence_id="result",
+            evidence_type=carrier,
+            location_kind=EvidenceLocationKind.RELATIVE_PATH,
+            location="runs/run-1/result.json",
+            sha256=digest("result"),
+            size_bytes=1,
+            redaction_state=EvidenceRedactionState.REDACTED,
+            privacy_classification=EvidencePrivacyClass.INTERNAL,
+        )
+
+    with pytest.raises(BrowserContractError):
+        BrowserEvidenceItem(
+            evidence_id="result",
+            evidence_type="structured_result",
+            location_kind=EvidenceLocationKind.LOGICAL_KEY,
+            location=carrier,
+            sha256=digest("result"),
+            size_bytes=1,
+            redaction_state=EvidenceRedactionState.REDACTED,
+            privacy_classification=EvidencePrivacyClass.INTERNAL,
+        )
+
+
+def test_attestation_identifier_surfaces_reject_credential_carriers() -> None:
+    artifact = script_artifact()
+    now = datetime.now(timezone.utc)
+    carrier = "password" + ":abc123"
+
+    base = dict(
+        task_id="task-001",
+        revision_id="rev-browser-001",
+        run_id="run-001",
+        script_artifact_fingerprint=artifact.fingerprint,
+        input_fingerprint=fingerprint_input({"query": "status"}),
+        runtime_provider="docker-worker",
+        browser_engine="chromium",
+        started_at=now,
+        finished_at=now,
+        terminal_result="completed",
+    )
+
+    for field_name in ("task_id", "revision_id", "run_id", "runtime_provider"):
+        candidate = dict(base)
+        candidate[field_name] = carrier
+        with pytest.raises(BrowserContractError):
+            BrowserRuntimeAttestation(**candidate)
+
+    failed = dict(base)
+    failed["terminal_result"] = "failed"
+    failed["failure_class"] = carrier
+    with pytest.raises(BrowserContractError):
+        BrowserRuntimeAttestation(**failed)
+
+
+def test_reference_and_origin_surfaces_reject_value_shaped_carriers() -> None:
+    with pytest.raises(BrowserContractError):
+        BrowserRuntimeRequirements(
+            credential_scopes=(
+                "secret://env/" + "sk-" + "proj-abc123def456",
+            ),
+        )
+
+    with pytest.raises(BrowserContractError):
+        execution_spec(
+            requirements=runtime_requirements(
+                network_mode=BrowserNetworkMode.RESTRICTED_EXTERNAL,
+            ),
+            effects=(BrowserEffect.BROWSER_READ,),
+            origins=(
+                "https://" + "sk-" + "proj-abc123.example.com",
+            ),
+        )
+
+
+def test_reference_metadata_names_remain_valid() -> None:
+    requirements = BrowserRuntimeRequirements(
+        credential_scopes=(
+            "secret://env/OPENAI_API_KEY",
+            "secret://windows-dpapi/browser/account-a",
+        )
+    )
+    assert requirements.credential_scopes == (
+        "secret://env/OPENAI_API_KEY",
+        "secret://windows-dpapi/browser/account-a",
+    )
+
+
 def test_credential_scope_is_reference_only_not_secret_value() -> None:
     requirements = BrowserRuntimeRequirements(
         credential_scopes=(
