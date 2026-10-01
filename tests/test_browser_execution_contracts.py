@@ -614,6 +614,34 @@ def test_embedded_wrapped_carriers_fail_closed_across_validator_classes() -> Non
         )
 
 
+@pytest.mark.parametrize(
+    "wrapped_signature",
+    (
+        "prefix-" + "sk-" + "proj-abc123",
+        "prefix-" + "sk_" + "proj_abc123",
+        "prefix-" + "sk." + "proj.abc123",
+        "prefix-" + "ghp_" + "abc123def456",
+        "prefix-" + "github_pat_" + "abc123def456",
+        "prefix-" + "xoxb-" + "abc123def456",
+    ),
+)
+def test_wrapped_known_token_signatures_rejected_anywhere(
+    wrapped_signature: str,
+) -> None:
+    with pytest.raises(BrowserContractError):
+        replace(
+            script_artifact(),
+            artifact_id=wrapped_signature,
+        )
+
+    with pytest.raises(BrowserContractError):
+        BrowserRuntimeRequirements(
+            credential_scopes=(
+                "secret://env/" + wrapped_signature,
+            ),
+        )
+
+
 def test_wrapped_long_hex_carriers_rejected_but_typed_digests_remain_valid() -> None:
     wrapped = "prefix-" + ("a" * 64)
 
