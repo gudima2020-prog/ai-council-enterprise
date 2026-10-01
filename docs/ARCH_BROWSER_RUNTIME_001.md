@@ -109,13 +109,17 @@ Only two bind mounts are supplied:
 The source is written before container creation and its directory is mounted
 read-only. The transient source directory is created beside the already-validated
 fixture root, on the same Docker-accessible project path, and is removed when the
-run completes. It is not created under the Windows user Temp directory.
+run completes. It is not created with `tempfile.TemporaryDirectory`.
 
-This is deliberate: Docker Desktop may reject both direct file binds and
-directory binds from the user's Temp tree with `CreateFile ... Access is denied`
-or generic `Access is denied` errors. The source staging directory contains only
-the exact frozen `script.py`; only that transient directory is mounted at
-`/input`. No permission/grant semantics are changed by this portability fix.
+On Windows, Python 3.13+ gives `os.mkdir(..., 0o700)` a restrictive ACL that
+allows only the current user and administrators. `tempfile.mkdtemp` /
+`TemporaryDirectory` uses that mode, which can make the directory unreadable to
+Docker Desktop and produce daemon return code 125 / `Access is denied`. The
+runtime therefore creates the staging directory with mode `0o755` on Windows
+(which Windows ignores, preserving inherited parent ACLs) and `0o700` on POSIX.
+The source staging directory contains only the exact frozen `script.py`; only
+that transient directory is mounted at `/input`, read-only, and cleanup failure
+is fail-closed.
 
 There is no host workspace write mount, Docker socket mount, browser profile,
 cookie jar, credential mount or secret environment variable.
