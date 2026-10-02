@@ -101,7 +101,7 @@ class BrowserRuntimeConfig:
     script_cpu_limit: float = 0.5
     output_limit_bytes: int = 256 * 1024
     input_limit_bytes: int = 1024 * 1024
-    protocol_line_limit_bytes: int = 64 * 1024
+    protocol_line_limit_bytes: int = 1024 * 1024
     max_rpc_requests: int = 256
     fixture_max_files: int = 256
     fixture_max_bytes: int = 8 * 1024 * 1024
@@ -121,8 +121,8 @@ class BrowserRuntimeConfig:
             raise ValueError("output_limit_bytes must be 1 KiB..4 MiB.")
         if not 1024 <= self.input_limit_bytes <= 8 * 1024 * 1024:
             raise ValueError("input_limit_bytes must be 1 KiB..8 MiB.")
-        if not 1024 <= self.protocol_line_limit_bytes <= 1024 * 1024:
-            raise ValueError("protocol_line_limit_bytes must be 1 KiB..1 MiB.")
+        if not 1024 <= self.protocol_line_limit_bytes <= 2 * 1024 * 1024:
+            raise ValueError("protocol_line_limit_bytes must be 1 KiB..2 MiB.")
         if not 1 <= self.max_rpc_requests <= 4096:
             raise ValueError("max_rpc_requests must be 1..4096.")
         if not 1 <= self.fixture_max_files <= 4096:
