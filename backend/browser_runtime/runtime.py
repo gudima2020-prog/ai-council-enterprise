@@ -47,7 +47,7 @@ SCRIPT_RUNTIME_VERSION_LABEL = "org.ai-studio.browser-script-runtime-version"
 SCRIPT_RUNTIME_VERSION_VALUE = "mediated-v1"
 
 _IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-_FIXTURE_ORIGIN_RE = re.compile(r"^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}$")
+_FIXTURE_ORIGIN_RE = re.compile(r"^http://127\.0\.0\.1:[1-9][0-9]{0,4}$")
 _ALLOWED_RPC_OPS = frozenset({"goto", "locator_inner_text"})
 
 
