@@ -23,12 +23,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
-where "%PYTHON%" >nul 2>&1
+"%PYTHON%" --version >nul 2>&1
 if errorlevel 1 (
-    if not exist "%PYTHON%" (
-        echo BROWSER_RUNTIME_PREPARE_ERROR: Python executable was not found: %PYTHON%
-        exit /b 1
-    )
+    echo BROWSER_RUNTIME_PREPARE_ERROR: Python executable was not usable: %PYTHON%
+    exit /b 1
 )
 
 echo Building trusted browser image: %BROWSER_IMAGE%
