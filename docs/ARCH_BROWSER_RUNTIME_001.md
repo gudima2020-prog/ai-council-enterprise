@@ -2,23 +2,29 @@
 
 ## Status
 
-Implementation candidate for Issue #12.
+Implementation candidate reopened after Independent Review FAIL on historical
+revision `0552b49bbbb56283363d12d7ecc94469809bcbc1`.
 
-Base revision:
+Base revision remains:
 
 ```text
 fbb3d19fadc68092baf86e25085bcfa8871755a3
 ```
 
-This slice adds the first executable BrowserRuntime for the contracts promoted by
-`ARCH-BROWSER-CONTRACT-001`. It is deliberately restricted to a deterministic
-local fixture inside a disposable Docker container. External network access,
-credentials, Human Approval consumption, Council tool-runtime wiring and
-evidence persistence remain future slices.
+The remediation changes the first fixture-only BrowserRuntime from an
+"in-container native Playwright Page handed to arbitrary Python" design to a
+**mediated two-container design**.
+
+The purpose is to enforce, rather than merely document, the boundary:
+
+```text
+UNTRUSTED SCRIPT != NATIVE PLAYWRIGHT AUTHORITY
+UNTRUSTED SCRIPT != BROWSER/CONTEXT CREATION AUTHORITY
+```
 
 ## Runtime profile
 
-The only profile accepted by `BrowserRuntimeService` is:
+The only accepted profile remains:
 
 ```text
 browser_engine       = chromium
@@ -27,65 +33,143 @@ filesystem_mode      = read_only_workspace
 download_policy      = deny
 capture_screenshots  = false
 credential_scopes    = ()
-effects               = (browser_read,)
-requested_origins     = ()
+effects              = (browser_read,)
+requested_origins    = ()
 ```
 
-Any other profile fails before `docker run`.
-
-The deliberately narrow profile avoids silently interpreting a requirements
-contract as an authorization grant. RUNTIME-001 does not accept
-`restricted_external`, secrets, upload, download or external-write effects.
+Any other profile fails before runtime image execution.
 
 ## Exact execution binding
 
-Before runtime image inspection or execution, the service validates:
+Before Docker execution the service validates:
 
-1. supplied source bytes SHA-256 equals
-   `BrowserScriptArtifact.source_sha256`;
-2. supplied artifact fingerprint equals
+1. source bytes SHA-256 equals `BrowserScriptArtifact.source_sha256`;
+2. artifact fingerprint equals
    `BrowserExecutionSpec.script_artifact_fingerprint`;
-3. supplied raw input recomputes to the exact
-   `BrowserExecutionSpec.input_fingerprint`;
-4. the deterministic fixture root exists, is bounded and contains no
-   symlink/junction indirection.
+3. raw input recomputes to the exact input fingerprint;
+4. fixture root exists, is bounded and contains no symlink/junction
+   indirection.
 
-Raw input is transported to the container over stdin. Docker stdin is kept open
-explicitly with `--interactive`; without that flag the container would receive
-EOF instead of the bound input payload. The raw input is not placed in the Docker
-command, environment or a persistent host file.
+Raw input is sent only through the script-runtime stdin protocol. It is not put
+in Docker argv, environment variables or persistent host files.
 
-## Trusted image binding
+## Mediated architecture
 
-The configured local image tag is not executed directly.
-
-The host first resolves the tag to a local Docker image ID:
+The host starts two disposable containers by verified digest:
 
 ```text
-sha256:<64 hex>
+untrusted script container
+        |
+        | narrow JSON RPC over host-relayed stdin/stdout
+        v
+trusted browser container
+        |
+        v
+Playwright -> Browser -> BrowserContext -> Page -> fixture
 ```
 
-It then verifies the required labels **against that digest** and executes the
-digest itself. This avoids a tag-only trust decision.
+The two containers have no direct network path to each other.
 
-Required labels:
+### Trusted browser container
 
-```text
-org.ai-studio.browser-runtime=arch-browser-runtime-001
-org.ai-studio.browser-runtime-version=fixture-v1
+The browser container:
+
+- contains Playwright and Chromium;
+- owns the loopback fixture HTTP server;
+- launches fresh Chromium;
+- creates the only trusted BrowserContext and Page;
+- creates the context with:
+  - `service_workers="block"`;
+  - `accept_downloads=False`;
+- accepts only the narrow operations:
+  - `goto`;
+  - `locator_inner_text`;
+- accepts navigation only to the exact per-run fixture origin;
+- never imports or executes the untrusted script.
+
+The trusted browser server emits browser/Playwright metadata before processing
+script operations.
+
+### Untrusted script container
+
+The script container:
+
+- is built from a minimal Python image;
+- contains no Playwright dependency and no Chromium installation;
+- receives only the frozen `script.py` mount;
+- has `--network=none`;
+- receives a `PageProxy`, not a native Playwright Page;
+- has no `page.context`, `page.browser`, `Browser` or `BrowserContext`
+  API surface;
+- can request only the host-approved RPC vocabulary.
+
+The script interface remains:
+
+```python
+async def run(page, context):
+    ...
 ```
 
-Runtime execution uses `--pull=never`. It does not download or rebuild an
-image automatically.
+but `page` is a capability-limited proxy.
+
+This preserves the authoring shape while removing native Playwright/browser
+authority from untrusted Python.
+
+## Host mediation
+
+The host is the only relay between the two containers.
+
+It:
+
+1. validates the trusted browser and script images;
+2. starts the browser container;
+3. validates the exact browser `ready` envelope;
+4. starts the script container;
+5. sends exact raw input + fixture origin;
+6. relays only a fixed RPC vocabulary;
+7. enforces monotonically increasing request IDs;
+8. enforces a bounded request count;
+9. requires exact protocol key sets;
+10. rejects unknown fields/operations;
+11. returns only bounded canonical-JSON task output.
+
+No RPC allows:
+
+- Browser creation;
+- BrowserContext creation;
+- arbitrary Playwright evaluation;
+- arbitrary filesystem access;
+- download access;
+- network configuration;
+- credentials;
+- process control.
+
+## Download denial
+
+The historical Independent Review blocker was valid: the old worker declared
+`download_policy=deny` but did not set `accept_downloads=False`.
+
+The mediated browser server now explicitly creates the context with:
+
+```python
+browser.new_context(
+    service_workers="block",
+    accept_downloads=False,
+)
+```
+
+The deterministic fixture includes an attachment response
+(`download.txt`) specifically for negative testing.
+
+The untrusted proxy also exposes no download object/path API.
 
 ## Container boundary
 
-The execution command is shell-free and includes:
+Both containers are shell-free and run with:
 
 ```text
 --interactive
 --rm
---name <unique run name>
 --pull=never
 --network=none
 --ipc=none
@@ -100,152 +184,123 @@ The execution command is shell-free and includes:
 --tmpfs /tmp:rw,nosuid,nodev,...
 ```
 
-Only two bind mounts are supplied:
+Browser container host mounts:
 
-- a transient host directory containing only the exact frozen `script.py` →
-  `/input`, read-only;
-- deterministic fixture root → `/fixture`, read-only.
+- deterministic fixture root -> `/fixture`, read-only.
 
-The source is written before container creation and its directory is mounted
-read-only. The transient source directory is created beside the already-validated
-fixture root, on the same Docker-accessible project path, and is removed when the
-run completes. It is not created with `tempfile.TemporaryDirectory`.
+Script container host mounts:
 
-On Windows, Python 3.13+ gives `os.mkdir(..., 0o700)` a restrictive ACL that
-allows only the current user and administrators. `tempfile.mkdtemp` /
-`TemporaryDirectory` uses that mode, which can make the directory unreadable to
-Docker Desktop and produce daemon return code 125 / `Access is denied`. The
-runtime therefore creates the staging directory with mode `0o755` on Windows
-(which Windows ignores, preserving inherited parent ACLs) and `0o700` on POSIX.
-The source staging directory contains only the exact frozen `script.py`; only
-that transient directory is mounted at `/input`, read-only, and cleanup failure
-is fail-closed.
+- transient directory containing only the exact frozen `script.py` ->
+  `/input`, read-only.
 
-There is no host workspace write mount, Docker socket mount, browser profile,
-cookie jar, credential mount or secret environment variable.
+There is no Docker socket, writable host workspace, browser profile, credential
+mount or secret environment variable.
 
-The verified image digest, not the mutable tag, is passed to `docker run`.
+## Trusted image binding
 
-## Browser lifecycle
+The host independently resolves and verifies two local images:
 
-The trusted image owns the lifecycle:
+```text
+ai-studio-browser-runtime:mediated-v2
+ai-studio-browser-script-runtime:mediated-v1
+```
 
-1. trusted runner starts a loopback-only fixture HTTP server;
-2. trusted worker creates Playwright and launches fresh headless Chromium;
-3. worker creates a fresh BrowserContext and Page;
-4. only then is the untrusted frozen script imported;
-5. the script receives a `page` and a value-only context containing:
-   - `fixture_origin`;
-   - raw input for this exact execution;
-6. result must be bounded JSON;
-7. context and browser are closed;
-8. container terminates and is removed.
+For each image:
 
-The untrusted script is never asked to launch Chromium itself.
+1. tag resolves to local `sha256:<64 hex>`;
+2. trust/version labels are read from that digest;
+3. execution uses the digest;
+4. `--pull=never` is used at runtime.
 
-The worker emits browser/runtime metadata before importing the untrusted script,
-then redirects process stdout/stderr to `/dev/null` before user code executes.
-This keeps the trusted runner protocol separate from ordinary script output.
-Unexpected extra protocol output fails closed.
+The BrowserRuntime attestation continues to bind the trusted browser image
+digest. `BrowserRuntimeExecutionResult` separately carries the script-runtime
+image digest.
+
+## Windows staging
+
+The source staging directory is created beside the validated fixture root.
+
+Windows uses a non-`0o700` mkdir mode so Python 3.13 does not apply its
+special restrictive ACL that previously caused Docker Desktop
+`Access is denied`.
+
+POSIX staging remains `0o700`.
+
+Cleanup failure is fail-closed.
 
 ## Fixture boundary
 
-The fixture server binds only to `127.0.0.1` inside a container whose Docker
-network mode is `none`.
+The trusted fixture server binds only to `127.0.0.1` inside the browser
+container.
 
-The server:
+It:
 
 - supports GET/HEAD only;
-- serves only from the read-only fixture root;
-- resolves requested paths under the fixture root;
-- does not implement external redirects;
-- returns `Cache-Control: no-store`;
-- exists only for the duration of the run.
+- resolves paths under the read-only fixture root;
+- rejects traversal/escape;
+- has no external redirect implementation;
+- exists only for the run.
 
-A browser script can attempt an external navigation, but Docker network
-isolation remains the enforcement boundary. Model/script output cannot widen
-egress.
+The trusted `goto` operation additionally rejects navigation outside the
+exact fixture origin.
 
-## Runtime protocol
+Docker `--network=none` remains the hard external-egress boundary.
 
-Trusted runner stdout is one bounded JSON envelope:
+## Protocol trust
 
-```json
-{
-  "schema_version": "arch-browser-runtime-001.runner.v1",
-  "ok": true,
-  "result": {},
-  "browser_version": "…",
-  "automation_runtime_version": "…"
-}
+There are two explicit versioned protocols:
+
+```text
+arch-browser-runtime-001.browser-server.v1
+arch-browser-runtime-001.script-runner.v1
 ```
 
-Failure output contains only a bounded error class, not raw exception text.
+The host requires exact envelope key sets.
 
-The host rejects:
+Untrusted stdout/stderr is redirected to `/dev/null` before the user module is
+loaded. The script-runner protocol uses duplicated non-inheritable file
+descriptors, so child processes inherit only suppressed standard streams.
 
-- missing output;
-- malformed JSON;
-- non-object output;
-- schema mismatch;
-- missing boolean `ok`;
-- oversized stdout;
-- missing runtime versions on success;
-- non-zero runner exit.
-
-No host fallback execution exists.
+Browser metadata can originate only from the trusted browser container.
 
 ## Attestation
 
-A successful execution returns `BrowserRuntimeExecutionResult` with a
-`BrowserRuntimeAttestation` bound to:
+Success attestation binds:
 
-- Task ID;
-- Task revision ID;
-- Workspace ID;
-- generated run ID;
-- exact script artifact fingerprint;
-- exact input fingerprint;
-- `docker-playwright-fixture` runtime provider;
-- verified Docker image digest;
-- Chromium engine/version;
+- task/revision/workspace/run;
+- script artifact fingerprint;
+- input fingerprint;
+- trusted browser image digest;
+- Chromium version;
 - Playwright version;
-- deterministic fixture-only network-policy fingerprint;
-- start/finish timestamps;
-- terminal result.
+- mediated fixture-only network-policy fingerprint;
+- timestamps/result state.
 
-Timeout and runner failures produce a failed/timeout attestation where possible.
+`BrowserRuntimeExecutionResult` additionally exposes the script-runtime image
+digest.
 
-Attestation remains evidence. It is not an ALLOW, approval or capability grant.
+Attestation remains evidence only. It is not authorization.
 
 ## Timeout behavior
 
-The Docker client call is bounded by
+The total mediated run is bounded by
 `BrowserRuntimeRequirements.max_runtime_seconds`.
 
-The container receives a unique name. On timeout the host performs an explicit
-`docker rm --force <name>` cleanup attempt before returning a timeout failure.
-There is no retry or alternate runtime.
+Each container has a unique run-derived name. Timeout triggers forced-removal
+attempts for both containers. There is no retry or host execution fallback.
 
-## Trusted image preparation
+## Explicit preparation
 
-Run explicitly:
+`prepare_arch_browser_runtime_001.bat` now:
 
-```cmd
-prepare_arch_browser_runtime_001.bat
-```
+1. builds the browser image;
+2. builds the minimal script image;
+3. resolves both tags to image digests;
+4. verifies labels on both digests;
+5. runs a real mediated `BrowserRuntimeService` smoke;
+6. prints both image IDs.
 
-The preparation gate:
-
-- requires a local Docker daemon;
-- builds the dedicated runtime image;
-- resolves the image tag to its local image digest;
-- verifies trusted labels against that digest;
-- runs the deterministic fixture smoke test by digest with `--interactive`,
-  `--network=none` and the same isolation flags;
-- prints the resulting image ID.
-
-The runtime itself never auto-builds or auto-pulls.
+The runtime never auto-builds or auto-pulls.
 
 ## Security invariants
 
@@ -254,10 +309,16 @@ SCRIPT_ARTIFACT != AUTHORIZATION
 CANONICAL_BROWSER_REQUIREMENTS != AUTHORIZATION
 REQUESTED_BROWSER_CAPABILITY != GRANTED_CAPABILITY
 
+UNTRUSTED_SCRIPT != NATIVE_PLAYWRIGHT_OBJECT
+UNTRUSTED_SCRIPT != BROWSER_CREATION_AUTHORITY
+UNTRUSTED_SCRIPT != BROWSER_CONTEXT_AUTHORITY
+PAGE_PROXY != PLAYWRIGHT_PAGE
+
 MODEL_OUTPUT != NETWORK_AUTHORITY
 MODEL_OUTPUT != SECRET_SCOPE
 MODEL_OUTPUT != CAPABILITY_GRANT
 
+DOWNLOAD_POLICY_DENY => ACCEPT_DOWNLOADS_FALSE
 BROWSER_SESSION != PERSISTENT_STATE
 RUNTIME_ATTESTATION != AUTHORIZATION
 FIXTURE_ONLY != EXTERNAL_EGRESS
@@ -266,19 +327,18 @@ IMAGE_TAG != TRUSTED_IMAGE_ID
 
 ## Explicit non-goals
 
-This slice does not implement:
+This slice still does not implement:
 
-- `restricted_external` egress;
-- DNS/IP/redirect policy for external origins;
-- credential resolution or injection;
-- Human Approval request/consume;
-- ToolExecutionRuntime integration;
-- AgentToolRuntimeGovernance integration;
+- restricted external egress;
+- credentials;
+- Human Approval consumption;
+- ToolExecutionRuntime wiring;
+- AgentToolRuntimeGovernance wiring;
 - ActionGateway;
-- DB persistence/migration;
+- DB persistence;
 - persistent browser sessions/profiles;
-- downloads/uploads/external write;
-- screenshot/evidence materialization;
+- upload/download capability;
+- screenshots;
 - BrowserEvidenceManifest;
 - replay;
 - Skill Registry/Factory/Router;
@@ -289,12 +349,18 @@ This slice does not implement:
 ```text
 backend/browser_runtime/runtime.py
 backend/browser_runtime/__init__.py
+
 docker/browser_runtime/Dockerfile
 docker/browser_runtime/requirements.txt
 docker/browser_runtime/runner.py
-docker/browser_runtime/worker.py
-docker/browser_runtime/fixture/index.html
+docker/browser_runtime/service_smoke.py
 docker/browser_runtime/smoke_script.py
+docker/browser_runtime/fixture/index.html
+docker/browser_runtime/fixture/download.txt
+
+docker/browser_script/Dockerfile
+docker/browser_script/script_runner.py
+
 prepare_arch_browser_runtime_001.bat
 tests/test_browser_runtime_fixture.py
 docs/ARCH_BROWSER_RUNTIME_001.md
@@ -303,10 +369,11 @@ docs/ARCH_BROWSER_RUNTIME_001_INDEPENDENT_REVIEW_REQUEST.md
 
 ## Evidence classification
 
-Repository tests performed by the implementation process are
-`IMPLEMENTATION_SELF_TEST`.
+All historical evidence for revision `0552b49...` is historical only after
+the Independent Review FAIL.
 
-A run performed by the operator on their workstation is `USER_RUN_TEST`.
+Any evidence for this remediation candidate must be regenerated.
 
-Neither is Independent Review. Promotion still requires an exact frozen
-candidate, independent review and explicit Human Approval.
+Operator runs are `USER_RUN_TEST`. Security Review is not Independent Review.
+Promotion still requires a fresh frozen candidate, independent review and
+explicit Human Approval.
