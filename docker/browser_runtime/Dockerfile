@@ -1,7 +1,7 @@
 FROM mcr.microsoft.com/playwright/python:v1.55.0-noble
 
 LABEL org.ai-studio.browser-runtime="arch-browser-runtime-001" \
-      org.ai-studio.browser-runtime-version="fixture-v1" \
+      org.ai-studio.browser-runtime-version="mediated-v2" \
       org.ai-studio.component="browser-runtime"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -18,8 +18,7 @@ RUN python -m pip install \
         --requirement /opt/browser-runtime/requirements.txt
 
 COPY runner.py /opt/browser-runtime/runner.py
-COPY worker.py /opt/browser-runtime/worker.py
-RUN chmod 0555 /opt/browser-runtime/runner.py /opt/browser-runtime/worker.py
+RUN chmod 0555 /opt/browser-runtime/runner.py
 
 USER 65534:65534
 
