@@ -354,6 +354,7 @@ docker/browser_runtime/Dockerfile
 docker/browser_runtime/requirements.txt
 docker/browser_runtime/runner.py
 docker/browser_runtime/service_smoke.py
+docker/browser_runtime/security_probe.py
 docker/browser_runtime/smoke_script.py
 docker/browser_runtime/fixture/index.html
 docker/browser_runtime/fixture/download.txt
