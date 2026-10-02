@@ -2,8 +2,14 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-set "IMAGE=%AI_STUDIO_BROWSER_RUNTIME_IMAGE%"
-if not defined IMAGE set "IMAGE=ai-studio-browser-runtime:fixture-v1"
+set "BROWSER_IMAGE=%AI_STUDIO_BROWSER_RUNTIME_IMAGE%"
+if not defined BROWSER_IMAGE set "BROWSER_IMAGE=ai-studio-browser-runtime:mediated-v2"
+
+set "SCRIPT_IMAGE=%AI_STUDIO_BROWSER_SCRIPT_RUNTIME_IMAGE%"
+if not defined SCRIPT_IMAGE set "SCRIPT_IMAGE=ai-studio-browser-script-runtime:mediated-v1"
+
+set "PYTHON=%AI_STUDIO_PYTHON%"
+if not defined PYTHON set "PYTHON=python"
 
 where docker >nul 2>&1
 if errorlevel 1 (
@@ -17,52 +23,74 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Building trusted BrowserRuntime image: %IMAGE%
-docker build --pull --tag "%IMAGE%" --file ".\docker\browser_runtime\Dockerfile" ".\docker\browser_runtime"
+where "%PYTHON%" >nul 2>&1
 if errorlevel 1 (
-    echo BROWSER_RUNTIME_PREPARE_ERROR: image build failed.
-    exit /b 1
+    if not exist "%PYTHON%" (
+        echo BROWSER_RUNTIME_PREPARE_ERROR: Python executable was not found: %PYTHON%
+        exit /b 1
+    )
 )
 
-docker image inspect "%IMAGE%" --format "{{json .Config.Labels}}" | findstr /C:"org.ai-studio.browser-runtime" | findstr /C:"arch-browser-runtime-001" >nul
+echo Building trusted browser image: %BROWSER_IMAGE%
+docker build --pull --tag "%BROWSER_IMAGE%" --file ".\docker\browser_runtime\Dockerfile" ".\docker\browser_runtime"
 if errorlevel 1 (
-    echo BROWSER_RUNTIME_PREPARE_ERROR: trusted runtime label is missing.
+    echo BROWSER_RUNTIME_PREPARE_ERROR: browser image build failed.
     exit /b 1
 )
 
-docker image inspect "%IMAGE%" --format "{{json .Config.Labels}}" | findstr /C:"org.ai-studio.browser-runtime-version" | findstr /C:"fixture-v1" >nul
+echo Building untrusted-script image: %SCRIPT_IMAGE%
+docker build --pull --tag "%SCRIPT_IMAGE%" --file ".\docker\browser_script\Dockerfile" ".\docker\browser_script"
 if errorlevel 1 (
-    echo BROWSER_RUNTIME_PREPARE_ERROR: trusted runtime version is missing.
+    echo BROWSER_RUNTIME_PREPARE_ERROR: script image build failed.
     exit /b 1
 )
 
-for /f "delims=" %%I in ('docker image inspect "%IMAGE%" --format "{{.Id}}"') do set "IMAGE_ID=%%I"
-if not defined IMAGE_ID (
-    echo BROWSER_RUNTIME_PREPARE_ERROR: trusted image digest could not be resolved.
+for /f "delims=" %%I in ('docker image inspect "%BROWSER_IMAGE%" --format "{{.Id}}"') do set "BROWSER_IMAGE_ID=%%I"
+if not defined BROWSER_IMAGE_ID (
+    echo BROWSER_RUNTIME_PREPARE_ERROR: browser image digest could not be resolved.
     exit /b 1
 )
 
-docker image inspect "%IMAGE_ID%" --format "{{json .Config.Labels}}" | findstr /C:"org.ai-studio.browser-runtime" | findstr /C:"arch-browser-runtime-001" >nul
+for /f "delims=" %%I in ('docker image inspect "%SCRIPT_IMAGE%" --format "{{.Id}}"') do set "SCRIPT_IMAGE_ID=%%I"
+if not defined SCRIPT_IMAGE_ID (
+    echo BROWSER_RUNTIME_PREPARE_ERROR: script image digest could not be resolved.
+    exit /b 1
+)
+
+docker image inspect "%BROWSER_IMAGE_ID%" --format "{{json .Config.Labels}}" | findstr /C:"org.ai-studio.browser-runtime" | findstr /C:"arch-browser-runtime-001" >nul
 if errorlevel 1 (
-    echo BROWSER_RUNTIME_PREPARE_ERROR: digest-bound trusted runtime label is missing.
+    echo BROWSER_RUNTIME_PREPARE_ERROR: browser runtime trust label mismatch.
     exit /b 1
 )
 
-docker image inspect "%IMAGE_ID%" --format "{{json .Config.Labels}}" | findstr /C:"org.ai-studio.browser-runtime-version" | findstr /C:"fixture-v1" >nul
+docker image inspect "%BROWSER_IMAGE_ID%" --format "{{json .Config.Labels}}" | findstr /C:"org.ai-studio.browser-runtime-version" | findstr /C:"mediated-v2" >nul
 if errorlevel 1 (
-    echo BROWSER_RUNTIME_PREPARE_ERROR: digest-bound runtime version is missing.
+    echo BROWSER_RUNTIME_PREPARE_ERROR: browser runtime version label mismatch.
     exit /b 1
 )
 
-set "SCRIPT=%CD%\docker\browser_runtime\smoke_script.py"
-set "FIXTURE=%CD%\docker\browser_runtime\fixture"
+docker image inspect "%SCRIPT_IMAGE_ID%" --format "{{json .Config.Labels}}" | findstr /C:"org.ai-studio.browser-script-runtime" | findstr /C:"arch-browser-runtime-001-script" >nul
+if errorlevel 1 (
+    echo BROWSER_RUNTIME_PREPARE_ERROR: script runtime trust label mismatch.
+    exit /b 1
+)
+
+docker image inspect "%SCRIPT_IMAGE_ID%" --format "{{json .Config.Labels}}" | findstr /C:"org.ai-studio.browser-script-runtime-version" | findstr /C:"mediated-v1" >nul
+if errorlevel 1 (
+    echo BROWSER_RUNTIME_PREPARE_ERROR: script runtime version label mismatch.
+    exit /b 1
+)
+
 set "SMOKE=%TEMP%\ai-council-browser-runtime-smoke-%RANDOM%-%RANDOM%.txt"
 
-echo {"schema_version":"arch-browser-runtime-001.runner.v1","input":{"probe":"ready"}} | docker run --interactive --rm --pull=never --network=none --ipc=none --read-only --cap-drop=ALL --security-opt no-new-privileges=true --pids-limit 128 --cpus 1 --memory 1024m --memory-swap 1024m --user 65534:65534 --env HOME=/tmp/home --env XDG_CACHE_HOME=/tmp/cache --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777 --mount "type=bind,src=%SCRIPT%,dst=/input/script.py,readonly" --mount "type=bind,src=%FIXTURE%,dst=/fixture,readonly" "%IMAGE_ID%" --script /input/script.py --fixture-root /fixture --max-result-bytes 262144 > "%SMOKE%"
+set "AI_STUDIO_BROWSER_RUNTIME_IMAGE=%BROWSER_IMAGE%"
+set "AI_STUDIO_BROWSER_SCRIPT_RUNTIME_IMAGE=%SCRIPT_IMAGE%"
+
+"%PYTHON%" ".\docker\browser_runtime\service_smoke.py" > "%SMOKE%" 2>&1
 if errorlevel 1 (
     type "%SMOKE%"
     del /q "%SMOKE%" >nul 2>&1
-    echo BROWSER_RUNTIME_PREPARE_ERROR: isolated smoke test failed.
+    echo BROWSER_RUNTIME_PREPARE_ERROR: mediated service smoke failed.
     exit /b 1
 )
 
@@ -70,7 +98,7 @@ findstr /C:"\"ok\":true" "%SMOKE%" >nul
 if errorlevel 1 (
     type "%SMOKE%"
     del /q "%SMOKE%" >nul 2>&1
-    echo BROWSER_RUNTIME_PREPARE_ERROR: smoke protocol did not report success.
+    echo BROWSER_RUNTIME_PREPARE_ERROR: mediated smoke protocol did not report success.
     exit /b 1
 )
 
@@ -79,6 +107,8 @@ del /q "%SMOKE%" >nul 2>&1
 
 echo.
 echo BROWSER_RUNTIME_READY
-echo IMAGE=%IMAGE%
-echo IMAGE_ID=%IMAGE_ID%
+echo BROWSER_IMAGE=%BROWSER_IMAGE%
+echo BROWSER_IMAGE_ID=%BROWSER_IMAGE_ID%
+echo SCRIPT_IMAGE=%SCRIPT_IMAGE%
+echo SCRIPT_IMAGE_ID=%SCRIPT_IMAGE_ID%
 exit /b 0
