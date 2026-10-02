@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import io
 import json
@@ -623,8 +624,7 @@ def test_untrusted_page_proxy_has_no_native_context_or_browser() -> None:
         _ = page.browser
 
 
-@pytest.mark.asyncio
-async def test_page_proxy_exposes_only_mediated_ops() -> None:
+def test_page_proxy_exposes_only_mediated_ops() -> None:
     module = _load_script_runner_module()
     calls: list[tuple[str, dict[str, object]]] = []
 
@@ -635,12 +635,15 @@ async def test_page_proxy_exposes_only_mediated_ops() -> None:
                 return "ready"
             return {"url": args["url"]}
 
-    page = module.PageProxy(Protocol())
-    await page.goto(
-        "http://127.0.0.1:1234/",
-        wait_until="domcontentloaded",
-    )
-    text = await page.locator("#fixture-title").inner_text()
+    async def exercise():
+        page = module.PageProxy(Protocol())
+        await page.goto(
+            "http://127.0.0.1:1234/",
+            wait_until="domcontentloaded",
+        )
+        return await page.locator("#fixture-title").inner_text()
+
+    text = asyncio.run(exercise())
     assert text == "ready"
     assert calls == [
         (
