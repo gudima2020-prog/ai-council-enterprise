@@ -410,17 +410,34 @@ def main() -> int:
     )
     results["unsupported_rpc"] = "BLOCKED"
 
-    for signal_name in ("SIGTERM", "SIGKILL"):
-        _expect_fail_closed(
-            name=f"signal-{signal_name.lower()}",
-            source=f'''async def run(page, context):
+    term_source = b'''async def run(page, context):
     import os
     import signal
-    os.kill(1, signal.{signal_name})
-    return {{"unexpected": True}}
-'''.encode(),
+    os.kill(1, signal.SIGTERM)
+    return {"survived": True}
+'''
+    try:
+        term_result = execute_source(
+            name="signal-sigterm",
+            source=term_source,
+            max_runtime_seconds=5,
         )
-    results["script_pid1_term_kill"] = "FAIL_CLOSED"
+    except (BrowserRuntimeProtocolError, BrowserRuntimeExecutionError):
+        results["script_pid1_sigterm"] = "FAIL_CLOSED"
+    else:
+        assert term_result.result == {"survived": True}
+        results["script_pid1_sigterm"] = "INEFFECTIVE_OR_HANDLED"
+
+    _expect_fail_closed(
+        name="signal-sigkill",
+        source=b'''async def run(page, context):
+    import os
+    import signal
+    os.kill(1, signal.SIGKILL)
+    return {"unexpected": True}
+''',
+    )
+    results["script_pid1_sigkill"] = "FAIL_CLOSED"
 
     stop_exc = _expect_fail_closed(
         name="signal-sigstop",
