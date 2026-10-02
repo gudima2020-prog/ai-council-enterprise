@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 import argparse
-from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import importlib.metadata
 import json
 import mimetypes
 from pathlib import Path, PurePosixPath
-import subprocess
 import sys
 from threading import Thread
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-
-RUNNER_SCHEMA = "arch-browser-runtime-001.runner.v1"
-WORKER_META_SCHEMA = "arch-browser-runtime-001.worker-meta.v1"
-MAX_STDIN_BYTES = 1024 * 1024
+from playwright.async_api import async_playwright
 
 
-class RunnerError(RuntimeError):
+SERVER_SCHEMA = "arch-browser-runtime-001.browser-server.v1"
+MAX_PROTOCOL_BYTES = 64 * 1024
+_ALLOWED_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
+
+
+class ServerError(RuntimeError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
@@ -40,14 +41,14 @@ class FixtureHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlsplit(self.path)
             if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
-                raise RunnerError("fixture_request_invalid")
+                raise ServerError("fixture_request_invalid")
             decoded = unquote(parsed.path)
             if "\x00" in decoded or "\\" in decoded:
-                raise RunnerError("fixture_request_invalid")
+                raise ServerError("fixture_request_invalid")
             relative = PurePosixPath(decoded.lstrip("/"))
             if any(part in {"", ".", ".."} for part in relative.parts):
                 if decoded not in {"", "/"}:
-                    raise RunnerError("fixture_request_invalid")
+                    raise ServerError("fixture_request_invalid")
             target = self.fixture_root.joinpath(*relative.parts)
             if decoded in {"", "/"} or target.is_dir():
                 target = target / "index.html"
@@ -55,12 +56,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
             try:
                 resolved.relative_to(self.fixture_root)
             except ValueError as exc:
-                raise RunnerError("fixture_request_escape") from exc
+                raise ServerError("fixture_request_escape") from exc
             if not resolved.is_file() or resolved.is_symlink():
                 self.send_error(404)
                 return
             data = resolved.read_bytes()
-        except RunnerError:
+        except ServerError:
             self.send_error(400)
             return
         except OSError:
@@ -80,6 +81,11 @@ class FixtureHandler(BaseHTTPRequestHandler):
             "default-src 'self'; img-src 'self' data:; "
             "style-src 'self' 'unsafe-inline'; script-src 'self'",
         )
+        if resolved.name == "download.txt":
+            self.send_header(
+                "Content-Disposition",
+                'attachment; filename="download.txt"',
+            )
         self.end_headers()
         if not head_only:
             self.wfile.write(data)
@@ -87,173 +93,260 @@ class FixtureHandler(BaseHTTPRequestHandler):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--script", required=True)
     parser.add_argument("--fixture-root", required=True)
-    parser.add_argument("--max-result-bytes", type=int, required=True)
     return parser.parse_args()
 
 
-def read_stdin() -> bytes:
-    raw = sys.stdin.buffer.read(MAX_STDIN_BYTES + 1)
-    if len(raw) > MAX_STDIN_BYTES:
-        raise RunnerError("input_too_large")
-    try:
-        envelope = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RunnerError("input_invalid") from exc
-    if (
-        not isinstance(envelope, dict)
-        or envelope.get("schema_version") != RUNNER_SCHEMA
-        or "input" not in envelope
-    ):
-        raise RunnerError("input_schema_mismatch")
-    return raw
-
-
-def validate_path(path: str, expected_root: str) -> Path:
+def validate_fixture(path: str) -> Path:
     resolved = Path(path).resolve()
-    root = Path(expected_root).resolve()
+    root = Path("/fixture").resolve()
     try:
         resolved.relative_to(root)
     except ValueError as exc:
-        raise RunnerError("runtime_path_invalid") from exc
+        raise ServerError("runtime_path_invalid") from exc
+    if not resolved.is_dir():
+        raise ServerError("runtime_input_missing")
     return resolved
 
 
-def parse_worker_meta(raw: str) -> dict[str, str]:
-    lines = [line for line in raw.splitlines() if line.strip()]
-    if len(lines) != 1:
-        raise RunnerError("worker_protocol_invalid")
-    try:
-        value = json.loads(lines[0])
-    except json.JSONDecodeError as exc:
-        raise RunnerError("worker_protocol_invalid") from exc
-    if (
-        not isinstance(value, dict)
-        or value.get("schema_version") != WORKER_META_SCHEMA
-        or not isinstance(value.get("browser_version"), str)
-        or not value["browser_version"].strip()
-        or not isinstance(value.get("automation_runtime_version"), str)
-        or not value["automation_runtime_version"].strip()
-    ):
-        raise RunnerError("worker_protocol_invalid")
-    return {
-        "browser_version": value["browser_version"].strip(),
-        "automation_runtime_version": value[
-            "automation_runtime_version"
-        ].strip(),
-    }
-
-
 def emit(value: dict[str, Any]) -> None:
-    sys.stdout.write(
-        json.dumps(
-            value,
-            ensure_ascii=True,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+    raw = json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
     )
+    if len(raw.encode("utf-8")) > MAX_PROTOCOL_BYTES:
+        raise ServerError("protocol_output_too_large")
+    sys.stdout.write(raw + "\n")
     sys.stdout.flush()
+
+
+def read_message() -> dict[str, Any] | None:
+    raw = sys.stdin.buffer.readline(MAX_PROTOCOL_BYTES + 1)
+    if raw == b"":
+        return None
+    if len(raw) > MAX_PROTOCOL_BYTES or not raw.endswith(b"\n"):
+        raise ServerError("protocol_input_too_large")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ServerError("protocol_invalid") from exc
+    if not isinstance(value, dict):
+        raise ServerError("protocol_invalid")
+    return value
+
+
+def _request_id(value: Any) -> int:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or not 1 <= value <= 1_000_000
+    ):
+        raise ServerError("request_id_invalid")
+    return value
+
+
+def _timeout_ms(value: Any, *, default: int = 10_000) -> int:
+    if value is None:
+        return default
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or not 1 <= value <= 30_000
+    ):
+        raise ServerError("request_timeout_invalid")
+    return value
+
+
+def _fixture_url(value: Any, fixture_origin: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > 4096:
+        raise ServerError("navigation_url_invalid")
+    parsed = urlsplit(value)
+    expected = urlsplit(fixture_origin)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or parsed.port != expected.port
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise ServerError("navigation_denied")
+    return value
+
+
+async def dispatch(page, request: dict[str, Any], fixture_origin: str) -> Any:
+    if set(request) != {"schema_version", "type", "id", "op", "args"}:
+        raise ServerError("request_shape_invalid")
+    if (
+        request["schema_version"] != SERVER_SCHEMA
+        or request["type"] != "request"
+    ):
+        raise ServerError("request_schema_invalid")
+    request_id = _request_id(request["id"])
+    del request_id
+    op = request["op"]
+    args = request["args"]
+    if not isinstance(args, dict):
+        raise ServerError("request_args_invalid")
+
+    if op == "goto":
+        if not set(args).issubset({"url", "wait_until", "timeout_ms"}):
+            raise ServerError("request_args_invalid")
+        if "url" not in args:
+            raise ServerError("request_args_invalid")
+        url = _fixture_url(args["url"], fixture_origin)
+        wait_until = args.get("wait_until", "load")
+        if wait_until not in _ALLOWED_WAIT_UNTIL:
+            raise ServerError("wait_until_invalid")
+        timeout = _timeout_ms(args.get("timeout_ms"))
+        await page.goto(url, wait_until=wait_until, timeout=timeout)
+        return {"url": page.url}
+
+    if op == "locator_inner_text":
+        if not set(args).issubset({"selector", "timeout_ms"}):
+            raise ServerError("request_args_invalid")
+        selector = args.get("selector")
+        if (
+            not isinstance(selector, str)
+            or not selector
+            or len(selector) > 2048
+            or "\x00" in selector
+        ):
+            raise ServerError("selector_invalid")
+        timeout = _timeout_ms(args.get("timeout_ms"))
+        return await page.locator(selector).inner_text(timeout=timeout)
+
+    raise ServerError("operation_denied")
+
+
+async def run_server(args: argparse.Namespace) -> int:
+    fixture = validate_fixture(args.fixture_root)
+    FixtureHandler.fixture_root = fixture
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), FixtureHandler)
+    thread = Thread(
+        target=httpd.serve_forever,
+        name="browser-fixture-server",
+        daemon=True,
+    )
+    thread.start()
+    fixture_origin = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+    try:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                headless=True,
+                chromium_sandbox=False,
+                args=(
+                    "--disable-dev-shm-usage",
+                    "--disable-background-networking",
+                    "--disable-component-update",
+                    "--disable-default-apps",
+                    "--disable-sync",
+                    "--metrics-recording-only",
+                    "--no-first-run",
+                ),
+            )
+            context = await browser.new_context(
+                service_workers="block",
+                accept_downloads=False,
+            )
+            page = await context.new_page()
+            try:
+                emit(
+                    {
+                        "schema_version": SERVER_SCHEMA,
+                        "type": "ready",
+                        "browser_version": browser.version,
+                        "automation_runtime_version": importlib.metadata.version(
+                            "playwright"
+                        ),
+                        "fixture_origin": fixture_origin,
+                    }
+                )
+
+                while True:
+                    message = read_message()
+                    if message is None:
+                        return 70
+                    if (
+                        set(message) == {"schema_version", "type"}
+                        and message.get("schema_version") == SERVER_SCHEMA
+                        and message.get("type") == "shutdown"
+                    ):
+                        return 0
+
+                    request_id = message.get("id")
+                    try:
+                        _request_id(request_id)
+                        result = await dispatch(page, message, fixture_origin)
+                        emit(
+                            {
+                                "schema_version": SERVER_SCHEMA,
+                                "type": "response",
+                                "id": request_id,
+                                "ok": True,
+                                "result": result,
+                            }
+                        )
+                    except ServerError as exc:
+                        emit(
+                            {
+                                "schema_version": SERVER_SCHEMA,
+                                "type": "response",
+                                "id": request_id,
+                                "ok": False,
+                                "error_code": exc.code,
+                            }
+                        )
+                    except BaseException:
+                        emit(
+                            {
+                                "schema_version": SERVER_SCHEMA,
+                                "type": "response",
+                                "id": request_id,
+                                "ok": False,
+                                "error_code": "browser_operation_failed",
+                            }
+                        )
+            finally:
+                await context.close()
+                await browser.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=2)
 
 
 def main() -> int:
     try:
-        args = parse_args()
-        if not 1024 <= args.max_result_bytes <= 4 * 1024 * 1024:
-            raise RunnerError("result_limit_invalid")
+        import asyncio
 
-        script = validate_path(args.script, "/input")
-        fixture = validate_path(args.fixture_root, "/fixture")
-        if not script.is_file() or not fixture.is_dir():
-            raise RunnerError("runtime_input_missing")
-
-        stdin_bytes = read_stdin()
-        FixtureHandler.fixture_root = fixture
-        server = ThreadingHTTPServer(
-            ("127.0.0.1", 0),
-            FixtureHandler,
-        )
-        thread = Thread(
-            target=server.serve_forever,
-            name="browser-fixture-server",
-            daemon=True,
-        )
-        thread.start()
-        fixture_origin = (
-            f"http://127.0.0.1:{server.server_address[1]}"
-        )
-        result_path = Path("/tmp/browser-result.json")
-        if result_path.exists():
-            result_path.unlink()
-
+        return asyncio.run(run_server(parse_args()))
+    except ServerError as exc:
         try:
-            completed = subprocess.run(
-                [
-                    sys.executable,
-                    "-I",
-                    "/opt/browser-runtime/worker.py",
-                    "--script",
-                    str(script),
-                    "--fixture-origin",
-                    fixture_origin,
-                    "--result-path",
-                    str(result_path),
-                    "--max-result-bytes",
-                    str(args.max_result_bytes),
-                ],
-                input=stdin_bytes,
-                capture_output=True,
-                timeout=None,
-                check=False,
+            emit(
+                {
+                    "schema_version": SERVER_SCHEMA,
+                    "type": "fatal",
+                    "error_code": exc.code,
+                }
             )
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=2)
-
-        if completed.returncode != 0:
-            raise RunnerError("script_failed")
-
-        metadata = parse_worker_meta(
-            completed.stdout.decode("utf-8", errors="replace")
-        )
-        if not result_path.is_file():
-            raise RunnerError("result_missing")
-        raw_result = result_path.read_bytes()
-        if len(raw_result) > args.max_result_bytes:
-            raise RunnerError("result_too_large")
-        try:
-            result = json.loads(raw_result.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RunnerError("result_invalid") from exc
-
-        emit(
-            {
-                "schema_version": RUNNER_SCHEMA,
-                "ok": True,
-                "result": result,
-                **metadata,
-            }
-        )
-        return 0
-    except RunnerError as exc:
-        emit(
-            {
-                "schema_version": RUNNER_SCHEMA,
-                "ok": False,
-                "error_code": exc.code,
-            }
-        )
+        except BaseException:
+            pass
         return 70
     except BaseException:
-        emit(
-            {
-                "schema_version": RUNNER_SCHEMA,
-                "ok": False,
-                "error_code": "runner_failed",
-            }
-        )
+        try:
+            emit(
+                {
+                    "schema_version": SERVER_SCHEMA,
+                    "type": "fatal",
+                    "error_code": "browser_server_failed",
+                }
+            )
+        except BaseException:
+            pass
         return 70
 
 
