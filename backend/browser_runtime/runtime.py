@@ -160,7 +160,8 @@ class _BoundedLineReader:
     def __init__(self, stream: TextIO, *, limit_bytes: int) -> None:
         self._stream = stream
         self._limit_bytes = limit_bytes
-        self._queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+        self._queue: queue.Queue[tuple[str, str | None]] = queue.Queue(maxsize=1)
+        self._closed = threading.Event()
         self._thread = threading.Thread(
             target=self._pump,
             name="browser-runtime-protocol-reader",
@@ -168,19 +169,37 @@ class _BoundedLineReader:
         )
         self._thread.start()
 
+    def _emit(self, item: tuple[str, str | None]) -> bool:
+        while not self._closed.is_set():
+            try:
+                self._queue.put(item, timeout=0.05)
+            except queue.Full:
+                continue
+            return True
+        return False
+
     def _pump(self) -> None:
         try:
-            while True:
-                line = self._stream.readline()
+            while not self._closed.is_set():
+                # ``readline()`` without a size bound can accumulate an
+                # attacker-controlled unterminated line in host memory.  A
+                # character cap of limit+1 is sufficient to detect every
+                # ASCII overrun; multi-byte UTF-8 is rejected by the exact
+                # byte check below and therefore cannot evade the byte limit.
+                line = self._stream.readline(self._limit_bytes + 1)
                 if line == "":
-                    self._queue.put(("eof", None))
+                    self._emit(("eof", None))
                     return
                 if len(line.encode("utf-8", errors="replace")) > self._limit_bytes:
-                    self._queue.put(("oversized", None))
+                    self._emit(("oversized", None))
                     return
-                self._queue.put(("line", line))
+                if not self._emit(("line", line)):
+                    return
         except BaseException:
-            self._queue.put(("error", None))
+            self._emit(("error", None))
+
+    def close(self) -> None:
+        self._closed.set()
 
     def read(self, timeout: float) -> str:
         try:
@@ -664,6 +683,8 @@ class BrowserRuntimeService:
         deadline = time.monotonic() + timeout_seconds
         browser_process: subprocess.Popen[str] | None = None
         script_process: subprocess.Popen[str] | None = None
+        browser_reader: _BoundedLineReader | None = None
+        script_reader: _BoundedLineReader | None = None
         try:
             browser_process = self._start_process(browser_command)
             if browser_process.stdin is None or browser_process.stdout is None:
@@ -711,7 +732,7 @@ class BrowserRuntimeService:
             )
             init = json.loads(input_envelope)
             init["fixture_origin"] = ready["fixture_origin"]
-            self._write_object(script_process.stdin, init)
+            self._write_object(script_process.stdin, init, deadline)
 
             request_count = 0
             expected_id = 1
@@ -764,7 +785,11 @@ class BrowserRuntimeService:
                         "op": message["op"],
                         "args": message["args"],
                     }
-                    self._write_object(browser_process.stdin, browser_request)
+                    self._write_object(
+                        browser_process.stdin,
+                        browser_request,
+                        deadline,
+                    )
                     response = self._read_any_object(browser_reader, deadline)
                     if set(response) not in (
                         {
@@ -794,7 +819,7 @@ class BrowserRuntimeService:
                         raise BrowserRuntimeProtocolError(
                             "Browser response envelope is invalid."
                         )
-                    self._write_object(script_process.stdin, response)
+                    self._write_object(script_process.stdin, response, deadline)
                     expected_id += 1
                     continue
 
@@ -822,6 +847,7 @@ class BrowserRuntimeService:
                             "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
                             "type": "shutdown",
                         },
+                        deadline,
                     )
                     self._wait_process(script_process, deadline)
                     self._wait_process(browser_process, deadline)
@@ -865,6 +891,10 @@ class BrowserRuntimeService:
                     "Unsupported script protocol message."
                 )
         finally:
+            if browser_reader is not None:
+                browser_reader.close()
+            if script_reader is not None:
+                script_reader.close()
             if browser_process is not None and browser_process.poll() is None:
                 self._force_remove_container(browser_container)
             if script_process is not None and script_process.poll() is None:
@@ -902,19 +932,44 @@ class BrowserRuntimeService:
             )
         return value
 
-    def _write_object(self, stream: TextIO, value: dict[str, Any]) -> None:
+    def _write_object(
+        self,
+        stream: TextIO,
+        value: dict[str, Any],
+        deadline: float,
+    ) -> None:
         encoded = canonical_json(value)
         if len(encoded.encode("utf-8")) > self.config.protocol_line_limit_bytes:
             raise BrowserRuntimeProtocolError(
                 "Runtime protocol outbound line exceeded limit."
             )
+        outcome: queue.Queue[BaseException | None] = queue.Queue(maxsize=1)
+
+        def worker() -> None:
+            try:
+                stream.write(encoded + "\n")
+                stream.flush()
+            except BaseException as exc:  # fail closed across the thread boundary
+                outcome.put(exc)
+            else:
+                outcome.put(None)
+
+        thread = threading.Thread(
+            target=worker,
+            name="browser-runtime-protocol-writer",
+            daemon=True,
+        )
+        thread.start()
+
         try:
-            stream.write(encoded + "\n")
-            stream.flush()
-        except (BrokenPipeError, OSError) as exc:
+            error = outcome.get(timeout=self._remaining(deadline))
+        except queue.Empty as exc:
+            raise _MediatedTimeout from exc
+
+        if error is not None:
             raise BrowserRuntimeProtocolError(
                 "Runtime protocol write failed."
-            ) from exc
+            ) from error
 
     @staticmethod
     def _valid_error_code(value: Any) -> bool:

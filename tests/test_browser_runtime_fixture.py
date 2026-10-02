@@ -5,6 +5,8 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -565,6 +567,137 @@ def test_malformed_host_protocol_fails_closed(line: str) -> None:
         service._read_any_object(reader, deadline=10**12)
 
 
+def test_bounded_line_reader_rejects_unterminated_overrun_with_bounded_read() -> None:
+    calls: list[int] = []
+
+    class RecordingStream(io.StringIO):
+        def readline(self, size: int = -1) -> str:
+            calls.append(size)
+            return super().readline(size)
+
+    reader = _BoundedLineReader(
+        RecordingStream("x" * (128 * 1024)),
+        limit_bytes=1024,
+    )
+
+    with pytest.raises(BrowserRuntimeProtocolError, match="exceeded limit"):
+        reader.read(timeout=1)
+
+    assert calls == [1025]
+    assert reader._queue.maxsize == 1
+
+
+def test_bounded_line_reader_close_releases_full_queue_pump() -> None:
+    reader = _BoundedLineReader(
+        io.StringIO("{}\n{}\n{}\n"),
+        limit_bytes=1024,
+    )
+    deadline = time.monotonic() + 1
+    while reader._queue.qsize() != 1 and time.monotonic() < deadline:
+        time.sleep(0.001)
+
+    reader.close()
+    reader._thread.join(timeout=0.5)
+
+    assert not reader._thread.is_alive()
+
+
+def test_protocol_write_obeys_shared_deadline() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingStream:
+        def write(self, value: str) -> int:
+            started.set()
+            release.wait(timeout=2)
+            return len(value)
+
+        def flush(self) -> None:
+            return None
+
+    service = BrowserRuntimeService()
+    deadline = time.monotonic() + 0.05
+    try:
+        with pytest.raises(_MediatedTimeout):
+            service._write_object(
+                BlockingStream(),  # type: ignore[arg-type]
+                {"type": "blocked"},
+                deadline,
+            )
+        assert started.is_set()
+    finally:
+        release.set()
+
+
+def test_mediated_write_timeout_enters_container_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingStream:
+        def write(self, value: str) -> int:
+            started.set()
+            release.wait(timeout=2)
+            return len(value)
+
+        def flush(self) -> None:
+            return None
+
+    ready = json.dumps(
+        {
+            "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
+            "type": "ready",
+            "browser_version": "140",
+            "automation_runtime_version": "1.55.0",
+            "fixture_origin": "http://127.0.0.1:1234",
+        }
+    ) + "\n"
+
+    class FakeProcess:
+        def __init__(self, *, stdin, stdout) -> None:
+            self.stdin = stdin
+            self.stdout = stdout
+            self.returncode = None
+
+        def poll(self):
+            return None
+
+    browser_process = FakeProcess(stdin=io.StringIO(), stdout=io.StringIO(ready))
+    script_process = FakeProcess(stdin=BlockingStream(), stdout=io.StringIO())
+    processes = iter((browser_process, script_process))
+    removed: list[str] = []
+
+    service = BrowserRuntimeService()
+    monkeypatch.setattr(service, "_start_process", lambda command: next(processes))
+    monkeypatch.setattr(
+        service,
+        "_force_remove_container",
+        lambda name: removed.append(name),
+    )
+
+    try:
+        with pytest.raises(_MediatedTimeout):
+            service._execute_mediated(
+                browser_command=["browser"],
+                script_command=["script"],
+                input_envelope=json.dumps(
+                    {
+                        "schema_version": "test",
+                        "type": "init",
+                        "input": {},
+                    }
+                ),
+                timeout_seconds=0.05,
+                browser_container="browser-container",
+                script_container="script-container",
+            )
+        assert started.is_set()
+        assert removed == ["browser-container", "script-container"]
+    finally:
+        release.set()
+
+
 def test_exact_protocol_shape_rejects_unknown_fields() -> None:
     line = json.dumps(
         {
@@ -606,6 +739,59 @@ def _load_script_runner_module():
     module = importlib.util.module_from_spec(spec_obj)
     spec_obj.loader.exec_module(module)
     return module
+
+
+def _load_security_probe_module():
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "docker"
+        / "browser_runtime"
+        / "security_probe.py"
+    )
+    spec_obj = importlib.util.spec_from_file_location(
+        "browser_runtime_security_probe_test",
+        path,
+    )
+    assert spec_obj is not None and spec_obj.loader is not None
+    module = importlib.util.module_from_spec(spec_obj)
+    spec_obj.loader.exec_module(module)
+    return module
+
+
+def test_security_probe_cleanup_query_fails_closed_on_docker_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_security_probe_module()
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="Cannot connect to the Docker daemon",
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="docker container ls failed"):
+        module._container_absent("ai-council-browser-test")
+
+
+def test_security_probe_cleanup_query_uses_exact_container_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_security_probe_module()
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="ai-council-browser-present\nother\n",
+            stderr="",
+        ),
+    )
+
+    assert module._container_absent("ai-council-browser-missing") is True
+    assert module._container_absent("ai-council-browser-present") is False
 
 
 def test_untrusted_page_proxy_has_no_native_context_or_browser() -> None:

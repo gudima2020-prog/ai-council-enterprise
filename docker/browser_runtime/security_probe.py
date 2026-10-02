@@ -115,7 +115,7 @@ def _expect_fail_closed(
 
 def _container_absent(name: str) -> bool:
     completed = subprocess.run(
-        ["docker", "container", "inspect", name],
+        ["docker", "container", "ls", "--all", "--format", "{{.Names}}"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -124,7 +124,17 @@ def _container_absent(name: str) -> bool:
         check=False,
         shell=False,
     )
-    return completed.returncode != 0
+    if completed.returncode != 0:
+        raise AssertionError(
+            "docker container ls failed while checking runtime cleanup: "
+            f"{completed.stderr.strip()}"
+        )
+    names = {
+        line.strip()
+        for line in completed.stdout.splitlines()
+        if line.strip()
+    }
+    return name not in names
 
 
 def _assert_run_containers_absent(run_id: str) -> None:
