@@ -4,40 +4,52 @@
 
 Act as the Independent Reviewer for `ARCH-BROWSER-RUNTIME-001`.
 
-Do not modify the candidate. Do not count implementation or user-run results as
-independent evidence.
+Do not modify the candidate. Do not count implementation, operator USER_RUN or
+Security Review results as independent evidence.
+
+## Historical blocker context
+
+Historical frozen revision
+`0552b49bbbb56283363d12d7ecc94469809bcbc1` received Independent Review
+`FAIL` with two blockers:
+
+1. `download_policy=deny` was not enforced because the trusted context omitted
+   `accept_downloads=False`;
+2. arbitrary Python received a native Playwright `Page`, allowing it to regain
+   BrowserContext/Browser authority and launch another Chromium.
+
+The remediation candidate must be judged specifically on whether those blockers
+are actually removed, not merely renamed or hidden.
 
 ## Candidate identity
 
-The exact revision/tree/bundle hashes will be supplied with the frozen review
-bundle. Verify those independently before reviewing behavior.
+Exact revision/tree/base/bundle hashes are supplied in the frozen review bundle.
+
+Verify independently before behavioral review.
 
 ## Scope
 
-Review only the first fixture-only disposable BrowserRuntime.
+Review only the first fixture-only mediated BrowserRuntime.
 
-Do not require future external egress, credential broker, Human Approval
-consumption, ToolExecutionRuntime wiring, DB persistence, replay or Skill
-Factory unless this candidate incorrectly claims to implement them or weakens an
-existing boundary.
+Do not require future external egress, credentials, Human Approval,
+ToolExecutionRuntime wiring, DB persistence, replay or Skill Factory unless the
+candidate claims or weakens those boundaries.
 
 ## Mandatory review questions
 
 ### A. Exact subject binding
 
-Confirm before `docker run`:
+Confirm before any runtime execution:
 
-1. source bytes must match `BrowserScriptArtifact.source_sha256`;
-2. artifact fingerprint must equal the spec script fingerprint;
-3. raw input must recompute to the exact spec input fingerprint;
-4. malformed/non-canonical or oversized raw input fails closed;
+1. source SHA matches `BrowserScriptArtifact.source_sha256`;
+2. artifact fingerprint matches execution spec;
+3. raw input fingerprint recomputes exactly;
+4. malformed/non-canonical or oversized input fails closed;
 5. fixture root is bounded and rejects symlink/junction indirection.
 
-No drift may fall through to execution.
+### B. Narrow profile
 
-### B. Runtime profile narrowing
-
-Confirm RUNTIME-001 accepts only:
+Confirm only:
 
 ```text
 chromium
@@ -47,143 +59,211 @@ download deny
 capture_screenshots false
 no credential scopes
 browser_read only
-no requested external origins
+no external origins
 ```
 
-Independently probe:
+Unsupported profiles must fail before image execution.
 
-- `network_mode=none` → reject;
-- `restricted_external` → reject;
-- Firefox/WebKit → reject;
-- writable workspace profile → reject;
-- downloads → reject;
-- upload → reject;
-- external write → reject;
-- secret-use/credential scopes → reject;
-- screenshot-materialization request → reject.
+### C. Two-image trust boundary
 
-All must fail before Docker execution.
+Confirm the host resolves and verifies **both** runtime images:
 
-### C. Docker trust boundary
+```text
+browser runtime
+script runtime
+```
 
-Inspect exact command construction.
+For each:
 
-Confirm:
+- configured tag -> local `sha256:` digest;
+- trust/version labels inspected on that digest;
+- `docker run` uses digest, not tag;
+- `--pull=never`.
 
-- `shell=False`;
-- `--interactive` so the exact bound stdin payload reaches the container;
+The script-runtime image must be minimal and must not contain Playwright or
+Chromium/browser binaries.
+
+Try importing Playwright and invoking known Chromium/browser executable names
+inside the exact script-runtime image. Those attempts must fail.
+
+### D. Container isolation
+
+Confirm **both** containers use:
+
+- shell-free invocation;
+- `--interactive`;
 - `--network=none`;
 - `--read-only`;
 - `--ipc=none`;
 - `--cap-drop=ALL`;
 - `no-new-privileges=true`;
-- bounded PIDs/CPU/RAM/time;
-- memory swap does not exceed memory;
-- numeric non-root user;
-- writable tmpfs only;
-- source staging directory contains only the exact frozen `script.py`;
-- source staging directory is mounted read-only at `/input`;
-- no individual writable source-file bind is used;
-- fixture mount read-only;
-- no host workspace write mount;
+- numeric non-root UID/GID;
+- bounded PIDs/CPU/RAM/swap/time;
+- bounded writable tmpfs;
 - no Docker socket;
-- no secret env;
-- no browser profile mount;
-- `--pull=never`.
+- no credentials/secrets/browser-profile mounts.
 
-Verify the configured image tag is first resolved to an image digest, labels are
-verified **on that digest**, and `docker run` executes the digest rather than
-the mutable tag.
+Browser container may mount only the fixture root read-only.
 
-Look specifically for tag/label/run TOCTOU. The explicit preparation/smoke gate
-must also resolve the tag to an image digest, verify labels on that digest and
-run the smoke container by digest rather than by mutable tag.
+Script container may mount only the frozen source staging directory read-only.
 
-### D. Timeout/cleanup
+### E. Download blocker remediation
 
-Confirm the container has a unique per-run name and timeout triggers explicit
-forced removal.
+This is mandatory.
 
-Check that timeout does not silently retry or fall back to host execution.
+Confirm trusted BrowserContext creation explicitly uses:
 
-On Windows, specifically verify the real service path succeeds with the
-transient source **directory** bind created beside the validated fixture root.
-The staging directory must not be created by `tempfile.mkdtemp` /
-`TemporaryDirectory`: Python 3.13+ applies a restrictive ACL for Windows
-`mkdir(..., 0o700)`, which can prevent Docker Desktop from reading the bind
-source. Verify the implementation uses a non-`0o700` Windows mkdir mode so the
-project parent ACL is inherited, uses `0o700` on POSIX, mounts the staging
-directory read-only, removes it after execution, and fails closed if cleanup
-fails. Earlier candidates produced Docker daemon return code 125 /
-`Access is denied`; regression to that behavior is a blocker.
+```python
+accept_downloads=False
+```
 
-### E. Trusted runner vs untrusted script
+Independently use the deterministic attachment fixture
+`/download.txt` and attempt to obtain a usable download.
 
-Inspect `runner.py` and `worker.py`.
+The untrusted script must not be able to obtain:
+
+- a Download object;
+- a download path;
+- suggested filename + persisted bytes;
+- readable `HELLO_DOWNLOAD` contents from a downloaded artifact.
+
+A policy declaration alone is not sufficient.
+
+### F. Native Page/browser authority blocker remediation
+
+This is mandatory.
+
+The untrusted script must receive a mediated `PageProxy`, not a native
+Playwright Page.
+
+Independently probe from untrusted code:
+
+- `page.context`;
+- `page.browser`;
+- private/protected attribute discovery;
+- constructing BrowserContext;
+- importing `playwright.async_api`;
+- launching Chromium via Playwright;
+- launching Chromium/browser binaries with `subprocess`;
+- connecting to an existing browser/DevTools endpoint;
+- sending an unsupported raw RPC op.
+
+None may create another Browser, BrowserContext or unmanaged Page.
+
+The trusted browser container must be the only process with Playwright/browser
+authority.
+
+### G. Host-mediated RPC
+
+Confirm the containers have no direct communication path.
+
+The host must mediate a fixed protocol vocabulary.
+
+Current allowed operations are only:
+
+```text
+goto
+locator_inner_text
+```
 
 Confirm:
 
-- trusted runner owns fixture server;
-- fresh Chromium and BrowserContext are created for each run;
-- untrusted script receives an existing Page instead of browser-launch
-  authority;
-- worker metadata is emitted before user code import/execution;
-- untrusted script stdout/stderr cannot become the trusted runner protocol;
-- extra/malformed protocol bytes fail closed;
-- the runner actually receives the stdin JSON payload through Docker rather
-  than EOF (the smoke/runtime command must preserve stdin);
-- untrusted result is treated as untrusted task output, not authority;
-- raw exception text is not emitted in the protocol;
-- result size is bounded.
+- exact versioned schemas;
+- exact key sets;
+- monotonically increasing request IDs;
+- bounded request count;
+- bounded line size;
+- malformed JSON fails closed;
+- unknown fields fail closed;
+- unknown operations fail closed;
+- browser response ID/schema/shape mismatch fails closed.
 
-Try adversarial scripts that print, write stderr, spawn a child that writes to
-stdout, close the page/browser, return non-JSON, return oversized JSON and throw
-an exception. None may create a successful forged trusted envelope.
+Attempt protocol injection from:
 
-### F. Network isolation
+- user stdout;
+- user stderr;
+- spawned child stdout/stderr;
+- direct writes to inherited descriptors;
+- malformed/duplicate/out-of-order request IDs.
 
-Confirm fixture server binds to loopback only.
+No such attempt may forge browser metadata or widen RPC authority.
 
-Inspect fixture path translation for traversal/escape/symlink behavior.
+### H. Navigation / fixture confinement
 
-Run or reason independently about attempts to navigate/fetch:
+Confirm trusted `goto` accepts only the exact per-run loopback fixture origin.
 
-- fixture loopback → expected to work;
-- public internet → must fail;
-- metadata/private network targets → must fail because Docker network is none;
-- WebSocket/external HTTP from user script → must not gain egress.
+Independently attempt:
 
-Browser/API routing logic is not accepted as the sole isolation boundary;
-Docker `--network=none` must be present.
+- public HTTP/HTTPS;
+- private/metadata IPs;
+- alternate loopback port;
+- `file:`;
+- `data:`;
+- WebSocket;
+- query/path traversal forms as applicable.
 
-### G. Attestation semantics
+Browser/API validation is defense in depth; Docker `--network=none` must remain
+the hard external-egress boundary.
 
-Confirm success attestation binds exact:
+### I. Script-runtime process authority
 
-- Task/revision/workspace/run;
-- script fingerprint;
-- input fingerprint;
-- verified image digest;
-- Chromium version;
-- Playwright version;
-- fixture-only network-policy fingerprint;
-- timestamps/result.
+The script runtime is arbitrary Python, but must not have browser authority.
 
-Confirm attestation is evidence only and no field provides authorization,
-approval or grant semantics.
+Probe:
 
-### H. Existing boundaries
+- subprocess creation;
+- package inspection;
+- filesystem inspection;
+- `/proc` inspection;
+- PID/signal attempts;
+- child process protocol injection.
 
-Confirm this slice:
+These may not enable access to trusted browser stdio/processes or another
+browser.
 
-- does not change `ToolExecutionRuntime`;
-- does not change `AgentToolRuntimeGovernance`;
-- does not weaken CODE_EXECUTION fail-closed behavior;
-- adds no DB migration;
-- adds no credential resolver/injection;
-- adds no Human Approval consumption;
-- adds no external egress;
-- adds no Skill Registry/Factory/Router.
+### J. Trusted browser lifecycle and attestation
+
+Confirm:
+
+- trusted browser container launches fresh Chromium;
+- one trusted BrowserContext/Page is created;
+- context has `service_workers="block"` and `accept_downloads=False`;
+- browser/runtime metadata is emitted only by trusted browser container;
+- success task result may be untrusted, but browser metadata cannot come from
+  the script container;
+- browser image digest is attested;
+- script runtime digest is returned as execution metadata;
+- task/revision/workspace/run/script/input/network/timestamps remain bound;
+- attestation has no authorization semantics.
+
+### K. Timeout / cleanup
+
+Confirm unique names for both containers.
+
+On timeout both must receive forced-removal attempts.
+
+Check no host fallback/retry exists.
+
+Re-test Windows staging ACL remediation:
+
+- project-path staging;
+- no `TemporaryDirectory` / Windows `0o700` regression;
+- read-only script mount;
+- staging cleanup after execution;
+- cleanup failure is fail-closed.
+
+### L. Existing boundaries
+
+Confirm this remediation does not introduce:
+
+- ToolExecutionRuntime wiring;
+- AgentToolRuntimeGovernance wiring;
+- CODE_EXECUTION fallback;
+- credential injection;
+- Human Approval consumption;
+- DB migration/persistence;
+- external-egress policy;
+- Skill Registry/Factory/Router.
 
 ## Mandatory independent tests
 
@@ -196,9 +276,12 @@ python -m pytest -q tests/test_task_governance_planner.py tests/test_task_govern
 python -m pytest -q tests/test_agent_policy_enforcement_core.py tests/test_agent_human_approval_contract.py tests/test_execution_runtime_preflight.py tests/test_isolated_runtime_policy.py
 ```
 
-If Docker is available, independently run the explicit runtime preparation/smoke
-gate. Report that separately as independent runtime reproduction. If Docker is
-not available, say so; do not fabricate execution evidence.
+If Docker is available, independently run
+`prepare_arch_browser_runtime_001.bat` (or equivalent exact commands) and then
+run adversarial scripts against the exact built image digests.
+
+If Docker is unavailable, state that explicitly and do not claim Docker
+reproduction.
 
 ## Required output
 
@@ -216,5 +299,7 @@ SECURITY INVARIANTS CONFIRMED
 RISKS TO CARRY FORWARD
 ```
 
-Use `PASS` only if no blocker remains. Artifact identity failure is
-`BLOCKED`; a substantive implementation defect is `FAIL`.
+Use `PASS` only if `BLOCKERS=NONE`.
+
+Artifact identity failure is `BLOCKED`; a substantive implementation/security
+defect is `FAIL`.
