@@ -12,7 +12,7 @@ from typing import Any
 
 SCRIPT_SCHEMA = "arch-browser-runtime-001.script-runner.v1"
 BROWSER_SCHEMA = "arch-browser-runtime-001.browser-server.v1"
-MAX_PROTOCOL_BYTES = 64 * 1024
+MAX_PROTOCOL_BYTES = 1024 * 1024
 MAX_INPUT_BYTES = 1024 * 1024
 
 
