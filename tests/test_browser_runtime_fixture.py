@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import importlib.util
+import io
 import json
 from pathlib import Path
-import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 from backend.browser_runtime import (
+    BROWSER_SERVER_SCHEMA_VERSION,
     BrowserDownloadPolicy,
     BrowserEffect,
     BrowserEngine,
@@ -15,6 +18,14 @@ from backend.browser_runtime import (
     BrowserNetworkMode,
     BrowserRuntimeRequirements,
     BrowserScriptArtifact,
+    RUNTIME_LABEL,
+    RUNTIME_LABEL_VALUE,
+    RUNTIME_VERSION_LABEL,
+    RUNTIME_VERSION_VALUE,
+    SCRIPT_RUNTIME_LABEL,
+    SCRIPT_RUNTIME_LABEL_VALUE,
+    SCRIPT_RUNTIME_VERSION_LABEL,
+    SCRIPT_RUNTIME_VERSION_VALUE,
     fingerprint_input,
     sha256_bytes,
 )
@@ -26,11 +37,8 @@ from backend.browser_runtime.runtime import (
     BrowserRuntimeProfileError,
     BrowserRuntimeProtocolError,
     BrowserRuntimeService,
-    RUNNER_SCHEMA_VERSION,
-    RUNTIME_LABEL,
-    RUNTIME_LABEL_VALUE,
-    RUNTIME_VERSION_LABEL,
-    RUNTIME_VERSION_VALUE,
+    _BoundedLineReader,
+    _MediatedTimeout,
 )
 
 
@@ -107,78 +115,41 @@ def fixture_root(tmp_path: Path) -> Path:
     return root
 
 
-def trusted_labels() -> str:
-    return json.dumps(
-        {
-            RUNTIME_LABEL: RUNTIME_LABEL_VALUE,
-            RUNTIME_VERSION_LABEL: RUNTIME_VERSION_VALUE,
-        }
+def fake_images() -> SimpleNamespace:
+    return SimpleNamespace(
+        browser_digest="sha256:" + ("a" * 64),
+        script_digest="sha256:" + ("b" * 64),
     )
 
 
-def success_envelope() -> str:
-    return json.dumps(
-        {
-            "schema_version": RUNNER_SCHEMA_VERSION,
-            "ok": True,
-            "result": {"status": "ready"},
-            "browser_version": "140.0.0.0",
-            "automation_runtime_version": "1.55.0",
-        }
-    )
-
-
-class RunStub:
-    def __init__(self, run_result: subprocess.CompletedProcess[str]) -> None:
-        self.calls: list[tuple[list[str], dict[str, object]]] = []
-        self.run_result = run_result
-        self.digest = "sha256:" + ("a" * 64)
-
-    def __call__(self, command, **kwargs):
-        cmd = list(command)
-        self.calls.append((cmd, dict(kwargs)))
-        if cmd[1:3] == ["image", "inspect"]:
-            if cmd[-1] == "{{.Id}}":
-                return subprocess.CompletedProcess(
-                    cmd,
-                    0,
-                    stdout=self.digest + "\n",
-                    stderr="",
-                )
-            if cmd[-1] == "{{json .Config.Labels}}":
-                assert cmd[3] == self.digest
-                return subprocess.CompletedProcess(
-                    cmd,
-                    0,
-                    stdout=trusted_labels(),
-                    stderr="",
-                )
-        if len(cmd) > 1 and cmd[1] == "run":
-            return self.run_result
-        if cmd[1:3] == ["rm", "--force"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        raise AssertionError(f"Unexpected command: {cmd}")
-
-
-def test_success_uses_digest_bound_network_none_container(
+def test_success_constructs_two_isolated_digest_bound_containers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     raw_input = {"query": "input-only-marker-7f6c4b"}
-    stub = RunStub(
-        subprocess.CompletedProcess(
-            ["docker", "run"],
-            0,
-            stdout=success_envelope(),
-            stderr="",
-        )
-    )
+    fixture = fixture_root(tmp_path)
+    images = fake_images()
+    captured: dict[str, object] = {}
+
     monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        stub,
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: images,
     )
 
-    fixture = fixture_root(tmp_path)
+    def fake_mediated(self, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            result={"status": "ready"},
+            browser_version="140.0.0.0",
+            automation_runtime_version="1.55.0",
+        )
+
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_execute_mediated",
+        fake_mediated,
+    )
 
     result = BrowserRuntimeService().execute(
         artifact=artifact(),
@@ -190,47 +161,57 @@ def test_success_uses_digest_bound_network_none_container(
 
     assert result.result == {"status": "ready"}
     assert result.attestation.terminal_result.value == "completed"
-    assert result.attestation.runtime_image_digest == stub.digest
+    assert result.attestation.runtime_image_digest == images.browser_digest
+    assert result.script_runtime_image_digest == images.script_digest
     assert result.attestation.browser_version == "140.0.0.0"
     assert result.attestation.automation_runtime_version == "1.55.0"
-    assert result.attestation.network_policy_fingerprint is not None
 
-    run_call = next(call for call in stub.calls if call[0][1] == "run")
-    command, kwargs = run_call
-    assert "--interactive" in command
-    assert "--network=none" in command
-    assert "--read-only" in command
-    assert "--cap-drop=ALL" in command
-    assert "no-new-privileges=true" in command
-    assert "--pull=never" in command
-    assert "--ipc=none" in command
-    assert stub.digest in command
-    assert "ai-studio-browser-runtime:fixture-v1" not in command
-    assert kwargs["shell"] is False
-    assert kwargs["check"] is False
+    browser_command = captured["browser_command"]
+    script_command = captured["script_command"]
+    assert isinstance(browser_command, list)
+    assert isinstance(script_command, list)
 
-    mounts = [
-        command[index + 1]
-        for index, item in enumerate(command)
+    for command in (browser_command, script_command):
+        assert "--interactive" in command
+        assert "--network=none" in command
+        assert "--read-only" in command
+        assert "--ipc=none" in command
+        assert "--cap-drop=ALL" in command
+        assert "no-new-privileges=true" in command
+        assert "--pull=never" in command
+        assert "65534:65534" in command
+
+    assert images.browser_digest in browser_command
+    assert images.script_digest in script_command
+    assert "ai-studio-browser-runtime:mediated-v2" not in browser_command
+    assert "ai-studio-browser-script-runtime:mediated-v1" not in script_command
+
+    browser_mounts = [
+        browser_command[index + 1]
+        for index, item in enumerate(browser_command)
         if item == "--mount"
     ]
-    assert len(mounts) == 2
-    assert all(value.endswith(",readonly") for value in mounts)
-    assert any("dst=/input" in value for value in mounts)
-    assert all("dst=/input/script.py" not in value for value in mounts)
-    assert any("dst=/fixture" in value for value in mounts)
-
-    source_mount = next(value for value in mounts if "dst=/input" in value)
-    source_prefix = "type=bind,src="
-    source_host_path = source_mount.split(",dst=/input", 1)[0][
-        len(source_prefix):
+    script_mounts = [
+        script_command[index + 1]
+        for index, item in enumerate(script_command)
+        if item == "--mount"
     ]
+    assert len(browser_mounts) == 1
+    assert len(script_mounts) == 1
+    assert "dst=/fixture" in browser_mounts[0]
+    assert browser_mounts[0].endswith(",readonly")
+    assert "dst=/input" in script_mounts[0]
+    assert script_mounts[0].endswith(",readonly")
+    assert all("dst=/input" not in item for item in browser_mounts)
+    assert all("dst=/fixture" not in item for item in script_mounts)
+
+    source_host_path = script_mounts[0].split(",dst=/input", 1)[0].split(
+        "type=bind,src=", 1
+    )[1]
     assert Path(source_host_path).parent == fixture.parent
     assert not Path(source_host_path).exists()
-
-    stdin = str(kwargs["input"])
-    assert json.loads(stdin)["input"] == raw_input
-    assert raw_input["query"] not in " ".join(command)
+    assert raw_input["query"] not in " ".join(browser_command)
+    assert raw_input["query"] not in " ".join(script_command)
 
 
 def test_staging_directory_mode_avoids_windows_restrictive_acl() -> None:
@@ -245,7 +226,7 @@ def test_staging_directory_mode_avoids_windows_restrictive_acl() -> None:
         (None, {"query": "changed"}),
     ),
 )
-def test_binding_drift_rejected_before_docker(
+def test_binding_drift_rejected_before_image_or_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     changed_source: bytes | None,
@@ -254,13 +235,14 @@ def test_binding_drift_rejected_before_docker(
     raw_input = {"query": "fixture"}
     called = False
 
-    def forbidden(*args, **kwargs):
+    def forbidden(self):
         nonlocal called
         called = True
-        raise AssertionError("Docker must not be called.")
+        raise AssertionError("Images must not be inspected.")
 
     monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
         forbidden,
     )
 
@@ -276,25 +258,25 @@ def test_binding_drift_rejected_before_docker(
     assert called is False
 
 
-def test_artifact_fingerprint_drift_rejected_before_docker(
+def test_artifact_fingerprint_drift_rejected_before_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     raw_input = {"query": "fixture"}
-    other = artifact(b"async def run(page, context):\n    return 2\n")
-
+    other_source = b"async def run(page, context):\n    return 2\n"
+    other = artifact(other_source)
     monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("Docker must not be called.")
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: (_ for _ in ()).throw(
+            AssertionError("Images must not be inspected.")
         ),
     )
-
     with pytest.raises(BrowserRuntimeBindingError):
         BrowserRuntimeService().execute(
             artifact=other,
             spec=spec(raw_input, script=artifact()),
-            source_bytes=b"async def run(page, context):\n    return 2\n",
+            source_bytes=other_source,
             raw_input=raw_input,
             fixture_root=fixture_root(tmp_path),
         )
@@ -304,10 +286,10 @@ def test_artifact_fingerprint_drift_rejected_before_docker(
     "bad_requirements",
     (
         requirements(network_mode=BrowserNetworkMode.NONE),
-        requirements(
-            filesystem_mode=BrowserFilesystemMode.WORKSPACE_ONLY,
-        ),
+        requirements(network_mode=BrowserNetworkMode.RESTRICTED_EXTERNAL),
+        requirements(filesystem_mode=BrowserFilesystemMode.WORKSPACE_ONLY),
         requirements(browser_engine=BrowserEngine.FIREFOX),
+        requirements(browser_engine=BrowserEngine.WEBKIT),
         requirements(
             filesystem_mode=BrowserFilesystemMode.WORKSPACE_ONLY,
             download_policy=BrowserDownloadPolicy.WORKSPACE_ONLY,
@@ -315,51 +297,29 @@ def test_artifact_fingerprint_drift_rejected_before_docker(
         requirements(capture_screenshots=True),
     ),
 )
-def test_unsupported_runtime_profiles_fail_before_docker(
+def test_unsupported_runtime_profiles_fail_before_image_inspection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     bad_requirements: BrowserRuntimeRequirements,
 ) -> None:
     raw_input = {"query": "fixture"}
     monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("Docker must not be called.")
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: (_ for _ in ()).throw(
+            AssertionError("Images must not be inspected.")
         ),
     )
-
-    with pytest.raises(BrowserRuntimeProfileError):
-        BrowserRuntimeService().execute(
-            artifact=artifact(),
-            spec=spec(
-                raw_input,
-                runtime_requirements=bad_requirements,
-            ),
-            source_bytes=SOURCE,
-            raw_input=raw_input,
-            fixture_root=fixture_root(tmp_path),
-        )
-
-
-def test_restricted_external_profile_fails_before_docker(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    raw_input = {"query": "fixture"}
     candidate = spec(
         raw_input,
-        runtime_requirements=requirements(
-            network_mode=BrowserNetworkMode.RESTRICTED_EXTERNAL,
-        ),
-        origins=("https://example.com",),
-    )
-    monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("Docker must not be called.")
+        runtime_requirements=bad_requirements,
+        origins=(
+            ("https://example.com",)
+            if bad_requirements.network_mode
+            is BrowserNetworkMode.RESTRICTED_EXTERNAL
+            else ()
         ),
     )
-
     with pytest.raises(BrowserRuntimeProfileError):
         BrowserRuntimeService().execute(
             artifact=artifact(),
@@ -370,7 +330,7 @@ def test_restricted_external_profile_fails_before_docker(
         )
 
 
-def test_secret_use_profile_fails_before_docker(
+def test_secret_use_profile_fails_before_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -387,12 +347,12 @@ def test_secret_use_profile_fails_before_docker(
         ),
     )
     monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("Docker must not be called.")
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: (_ for _ in ()).throw(
+            AssertionError("Images must not be inspected.")
         ),
     )
-
     with pytest.raises(BrowserRuntimeProfileError):
         BrowserRuntimeService().execute(
             artifact=artifact(),
@@ -411,7 +371,7 @@ def test_secret_use_profile_fails_before_docker(
         BrowserEffect.BROWSER_DOWNLOAD,
     ),
 )
-def test_side_effect_profiles_fail_before_docker(
+def test_side_effect_profiles_fail_before_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     effect: BrowserEffect,
@@ -434,31 +394,23 @@ def test_side_effect_profiles_fail_before_docker(
             else BrowserDownloadPolicy.DENY
         ),
     )
-    origins = (
-        ("https://example.com",)
-        if req.network_mode is BrowserNetworkMode.RESTRICTED_EXTERNAL
-        else ()
-    )
-    candidate = BrowserExecutionSpec(
-        task_id="task-browser-runtime-001",
-        revision_id="task-rev-browser-runtime-001",
-        workspace_id="workspace-browser-runtime-001",
-        execution_initiator="agent",
-        script_artifact_fingerprint=artifact().fingerprint,
-        input_fingerprint=fingerprint_input(raw_input),
+    candidate = spec(
+        raw_input,
         runtime_requirements=req,
-        requested_capabilities=("browser.execute",),
         effects=(effect,),
-        requested_navigation_origins=origins,
-        requested_evidence=("structured_result",),
-    )
-    monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("Docker must not be called.")
+        origins=(
+            ("https://example.com",)
+            if req.network_mode is BrowserNetworkMode.RESTRICTED_EXTERNAL
+            else ()
         ),
     )
-
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: (_ for _ in ()).throw(
+            AssertionError("Images must not be inspected.")
+        ),
+    )
     with pytest.raises(BrowserRuntimeProfileError):
         BrowserRuntimeService().execute(
             artifact=artifact(),
@@ -469,71 +421,116 @@ def test_side_effect_profiles_fail_before_docker(
         )
 
 
-def test_untrusted_image_label_fails_closed(
-    tmp_path: Path,
+def test_inspect_trusted_images_binds_labels_to_each_digest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    raw_input = {"query": "fixture"}
-    digest = "sha256:" + ("a" * 64)
-    calls = 0
+    config = BrowserRuntimeConfig()
+    service = BrowserRuntimeService(config=config)
+    browser_digest = "sha256:" + ("a" * 64)
+    script_digest = "sha256:" + ("b" * 64)
+    calls: list[list[str]] = []
 
     def fake_run(command, **kwargs):
-        nonlocal calls
-        calls += 1
+        del kwargs
         cmd = list(command)
-        if calls == 1:
-            return subprocess.CompletedProcess(
-                cmd, 0, stdout=digest + "\n", stderr=""
-            )
-        return subprocess.CompletedProcess(
-            cmd,
-            0,
-            stdout=json.dumps({RUNTIME_LABEL: "wrong"}),
-            stderr="",
-        )
+        calls.append(cmd)
+        if cmd[1:3] == ["image", "inspect"]:
+            target = cmd[3]
+            fmt = cmd[-1]
+            if target == config.image and fmt == "{{.Id}}":
+                return SimpleNamespace(returncode=0, stdout=browser_digest + "\n")
+            if target == config.script_image and fmt == "{{.Id}}":
+                return SimpleNamespace(returncode=0, stdout=script_digest + "\n")
+            if target == browser_digest and fmt == "{{json .Config.Labels}}":
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            RUNTIME_LABEL: RUNTIME_LABEL_VALUE,
+                            RUNTIME_VERSION_LABEL: RUNTIME_VERSION_VALUE,
+                        }
+                    ),
+                )
+            if target == script_digest and fmt == "{{json .Config.Labels}}":
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            SCRIPT_RUNTIME_LABEL: SCRIPT_RUNTIME_LABEL_VALUE,
+                            SCRIPT_RUNTIME_VERSION_LABEL: (
+                                SCRIPT_RUNTIME_VERSION_VALUE
+                            ),
+                        }
+                    ),
+                )
+        raise AssertionError(cmd)
 
     monkeypatch.setattr(
         "backend.browser_runtime.runtime.subprocess.run",
         fake_run,
     )
 
-    with pytest.raises(BrowserRuntimeImageError):
-        BrowserRuntimeService().execute(
-            artifact=artifact(),
-            spec=spec(raw_input),
-            source_bytes=SOURCE,
-            raw_input=raw_input,
-            fixture_root=fixture_root(tmp_path),
+    images = service._inspect_trusted_images()
+    assert images.browser_digest == browser_digest
+    assert images.script_digest == script_digest
+    assert any(call[3] == browser_digest for call in calls if len(call) > 3)
+    assert any(call[3] == script_digest for call in calls if len(call) > 3)
+
+
+def test_untrusted_image_label_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = BrowserRuntimeService()
+    digest = "sha256:" + ("a" * 64)
+    calls = 0
+
+    def fake_run(command, **kwargs):
+        nonlocal calls
+        del kwargs
+        calls += 1
+        cmd = list(command)
+        if calls == 1:
+            return SimpleNamespace(returncode=0, stdout=digest + "\n")
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({RUNTIME_LABEL: "wrong"}),
         )
 
-    assert calls == 2
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.subprocess.run",
+        fake_run,
+    )
+    with pytest.raises(BrowserRuntimeImageError):
+        service._inspect_trusted_image(
+            image=service.config.image,
+            label=RUNTIME_LABEL,
+            label_value=RUNTIME_LABEL_VALUE,
+            version_label=RUNTIME_VERSION_LABEL,
+            version_value=RUNTIME_VERSION_VALUE,
+        )
 
 
-def test_timeout_forces_container_removal_and_returns_attestation(
+def test_timeout_forces_both_containers_and_returns_attestation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     raw_input = {"query": "fixture"}
-    stub = RunStub(
-        subprocess.CompletedProcess(
-            ["docker", "run"],
-            0,
-            stdout=success_envelope(),
-            stderr="",
-        )
-    )
-    original = stub
-
-    def timeout_run(command, **kwargs):
-        cmd = list(command)
-        if len(cmd) > 1 and cmd[1] == "run":
-            original.calls.append((cmd, dict(kwargs)))
-            raise subprocess.TimeoutExpired(cmd, timeout=30)
-        return original(command, **kwargs)
-
+    images = fake_images()
+    removed: list[str] = []
     monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        timeout_run,
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: images,
+    )
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_execute_mediated",
+        lambda self, **kwargs: (_ for _ in ()).throw(_MediatedTimeout()),
+    )
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_force_remove_container",
+        lambda self, name: removed.append(name),
     )
 
     with pytest.raises(BrowserRuntimeExecutionError) as exc_info:
@@ -549,181 +546,174 @@ def test_timeout_forces_container_removal_and_returns_attestation(
     assert attestation is not None
     assert attestation.terminal_result.value == "timeout"
     assert attestation.failure_class == "runtime_timeout"
-    assert any(
-        call[0][1:3] == ["rm", "--force"]
-        for call in original.calls
-    )
+    assert len(set(removed)) == 2
 
 
 @pytest.mark.parametrize(
-    "stdout",
+    "line",
     (
         "",
-        "not-json",
-        json.dumps({"schema_version": "wrong", "ok": True}),
-        json.dumps(
-            {
-                "schema_version": RUNNER_SCHEMA_VERSION,
-                "ok": "yes",
-            }
-        ),
+        "not-json\n",
+        "[]\n",
     ),
 )
-def test_malformed_runner_protocol_fails_closed(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    stdout: str,
-) -> None:
-    raw_input = {"query": "fixture"}
-    stub = RunStub(
-        subprocess.CompletedProcess(
-            ["docker", "run"],
-            0,
-            stdout=stdout,
-            stderr="",
-        )
-    )
-    monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        stub,
-    )
-
-    with pytest.raises(BrowserRuntimeProtocolError):
-        BrowserRuntimeService().execute(
-            artifact=artifact(),
-            spec=spec(raw_input),
-            source_bytes=SOURCE,
-            raw_input=raw_input,
-            fixture_root=fixture_root(tmp_path),
-        )
-
-
-def test_docker_failure_without_protocol_returns_failed_attestation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    raw_input = {"query": "fixture"}
-    stub = RunStub(
-        subprocess.CompletedProcess(
-            ["docker", "run"],
-            125,
-            stdout="",
-            stderr="docker daemon rejected bind mount",
-        )
-    )
-    monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        stub,
-    )
-
-    with pytest.raises(BrowserRuntimeExecutionError) as exc_info:
-        BrowserRuntimeService().execute(
-            artifact=artifact(),
-            spec=spec(raw_input),
-            source_bytes=SOURCE,
-            raw_input=raw_input,
-            fixture_root=fixture_root(tmp_path),
-        )
-
-    attestation = exc_info.value.attestation
-    assert attestation is not None
-    assert attestation.terminal_result.value == "failed"
-    assert attestation.failure_class == "docker_run_failed"
-
-
-def test_nonzero_runner_exit_is_failed_attestation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    raw_input = {"query": "fixture"}
-    stub = RunStub(
-        subprocess.CompletedProcess(
-            ["docker", "run"],
-            70,
-            stdout=json.dumps(
-                {
-                    "schema_version": RUNNER_SCHEMA_VERSION,
-                    "ok": False,
-                    "error_code": "script_failed",
-                }
-            ),
-            stderr="ignored",
-        )
-    )
-    monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        stub,
-    )
-
-    with pytest.raises(BrowserRuntimeExecutionError) as exc_info:
-        BrowserRuntimeService().execute(
-            artifact=artifact(),
-            spec=spec(raw_input),
-            source_bytes=SOURCE,
-            raw_input=raw_input,
-            fixture_root=fixture_root(tmp_path),
-        )
-
-    attestation = exc_info.value.attestation
-    assert attestation is not None
-    assert attestation.terminal_result.value == "failed"
-    assert attestation.failure_class == "script_failed"
-
-
-def test_input_limit_rejects_before_docker_run(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    raw_input = {"payload": "x" * 5000}
-    config = BrowserRuntimeConfig(input_limit_bytes=1024)
-    stub = RunStub(
-        subprocess.CompletedProcess(
-            ["docker", "run"],
-            0,
-            stdout=success_envelope(),
-            stderr="",
-        )
-    )
-    monkeypatch.setattr(
-        "backend.browser_runtime.runtime.subprocess.run",
-        stub,
-    )
-
-    with pytest.raises(BrowserRuntimeBindingError):
-        BrowserRuntimeService(config=config).execute(
-            artifact=artifact(),
-            spec=spec(raw_input),
-            source_bytes=SOURCE,
-            raw_input=raw_input,
-            fixture_root=fixture_root(tmp_path),
-        )
-
-    assert all(
-        not (len(call[0]) > 1 and call[0][1] == "run")
-        for call in stub.calls
-    )
-
-
-def test_fixture_must_be_nonempty_and_nonindirect(tmp_path: Path) -> None:
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    raw_input = {"query": "fixture"}
+def test_malformed_host_protocol_fails_closed(line: str) -> None:
+    reader = _BoundedLineReader(io.StringIO(line), limit_bytes=4096)
     service = BrowserRuntimeService()
+    with pytest.raises(BrowserRuntimeProtocolError):
+        service._read_any_object(reader, deadline=10**12)
 
-    with pytest.raises(BrowserRuntimeBindingError):
-        service.execute(
-            artifact=artifact(),
-            spec=spec(raw_input),
-            source_bytes=SOURCE,
-            raw_input=raw_input,
-            fixture_root=empty,
+
+def test_exact_protocol_shape_rejects_unknown_fields() -> None:
+    line = json.dumps(
+        {
+            "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
+            "type": "ready",
+            "browser_version": "140",
+            "automation_runtime_version": "1.55.0",
+            "fixture_origin": "http://127.0.0.1:1234",
+            "unexpected": True,
+        }
+    ) + "\n"
+    reader = _BoundedLineReader(io.StringIO(line), limit_bytes=4096)
+    with pytest.raises(BrowserRuntimeProtocolError):
+        BrowserRuntimeService()._read_object(
+            reader,
+            deadline=10**12,
+            exact_keys={
+                "schema_version",
+                "type",
+                "browser_version",
+                "automation_runtime_version",
+                "fixture_origin",
+            },
         )
+
+
+def _load_script_runner_module():
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "docker"
+        / "browser_script"
+        / "script_runner.py"
+    )
+    spec_obj = importlib.util.spec_from_file_location(
+        "browser_script_runner_test",
+        path,
+    )
+    assert spec_obj is not None and spec_obj.loader is not None
+    module = importlib.util.module_from_spec(spec_obj)
+    spec_obj.loader.exec_module(module)
+    return module
+
+
+def test_untrusted_page_proxy_has_no_native_context_or_browser() -> None:
+    module = _load_script_runner_module()
+
+    class Protocol:
+        def request(self, op, args):
+            return {"url": "http://127.0.0.1:1/"}
+
+    page = module.PageProxy(Protocol())
+    assert not hasattr(page, "context")
+    assert not hasattr(page, "browser")
+    with pytest.raises(AttributeError):
+        _ = page.context
+    with pytest.raises(AttributeError):
+        _ = page.browser
+
+
+@pytest.mark.asyncio
+async def test_page_proxy_exposes_only_mediated_ops() -> None:
+    module = _load_script_runner_module()
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Protocol:
+        def request(self, op, args):
+            calls.append((op, args))
+            if op == "locator_inner_text":
+                return "ready"
+            return {"url": args["url"]}
+
+    page = module.PageProxy(Protocol())
+    await page.goto(
+        "http://127.0.0.1:1234/",
+        wait_until="domcontentloaded",
+    )
+    text = await page.locator("#fixture-title").inner_text()
+    assert text == "ready"
+    assert calls == [
+        (
+            "goto",
+            {
+                "url": "http://127.0.0.1:1234/",
+                "wait_until": "domcontentloaded",
+            },
+        ),
+        (
+            "locator_inner_text",
+            {"selector": "#fixture-title"},
+        ),
+    ]
+
+
+def test_script_image_contains_no_playwright_or_chromium_dependency() -> None:
+    dockerfile = (
+        Path(__file__).resolve().parents[1]
+        / "docker"
+        / "browser_script"
+        / "Dockerfile"
+    ).read_text(encoding="utf-8").lower()
+    runner = (
+        Path(__file__).resolve().parents[1]
+        / "docker"
+        / "browser_script"
+        / "script_runner.py"
+    ).read_text(encoding="utf-8").lower()
+    assert "playwright" not in dockerfile
+    assert "chromium" not in dockerfile
+    assert "from playwright" not in runner
+    assert "import playwright" not in runner
+
+
+def test_browser_server_explicitly_disables_downloads() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "docker"
+        / "browser_runtime"
+        / "runner.py"
+    ).read_text(encoding="utf-8")
+    assert "accept_downloads=False" in source
+    assert '"navigation_denied"' in source
+
+
+def test_download_denial_fixture_is_attachment() -> None:
+    runner = (
+        Path(__file__).resolve().parents[1]
+        / "docker"
+        / "browser_runtime"
+        / "runner.py"
+    ).read_text(encoding="utf-8")
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "docker"
+        / "browser_runtime"
+        / "fixture"
+        / "download.txt"
+    )
+    assert fixture.read_text(encoding="utf-8").strip() == "HELLO_DOWNLOAD"
+    assert "Content-Disposition" in runner
+    assert "download.txt" in runner
 
 
 def test_runtime_config_validation() -> None:
     with pytest.raises(ValueError):
         BrowserRuntimeConfig(cpu_limit=0)
     with pytest.raises(ValueError):
+        BrowserRuntimeConfig(script_cpu_limit=0)
+    with pytest.raises(ValueError):
         BrowserRuntimeConfig(user="root")
     with pytest.raises(ValueError):
         BrowserRuntimeConfig(output_limit_bytes=10)
+    with pytest.raises(ValueError):
+        BrowserRuntimeConfig(max_rpc_requests=0)
