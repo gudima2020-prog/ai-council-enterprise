@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import queue
 import subprocess
 import sys
+import threading
 import time
 from typing import Any
 
@@ -135,6 +137,155 @@ def _assert_run_containers_absent(run_id: str) -> None:
         time.sleep(0.2)
     raise AssertionError(
         f"Runtime containers still present after cleanup: {browser}, {script}"
+    )
+
+
+def _running_container_names(prefix: str) -> set[str]:
+    completed = subprocess.run(
+        ["docker", "ps", "--format", "{{.Names}}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+        check=False,
+        shell=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError("docker ps failed during signal probe.")
+    return {
+        line.strip()
+        for line in completed.stdout.splitlines()
+        if line.strip().startswith(prefix)
+    }
+
+
+def _wait_for_new_script_container(
+    *,
+    before: set[str],
+    timeout_seconds: float = 10,
+) -> str:
+    prefix = "ai-council-script-browser-run-"
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        current = _running_container_names(prefix)
+        new_names = sorted(current - before)
+        if len(new_names) == 1:
+            return new_names[0]
+        if len(new_names) > 1:
+            raise AssertionError(
+                f"Multiple new script containers found: {new_names}"
+            )
+        time.sleep(0.1)
+    raise AssertionError("Timed out waiting for script container.")
+
+
+def _run_host_signal_probe(
+    *,
+    signal_name: str,
+    expected_timeout: bool,
+) -> Exception:
+    before = _running_container_names(
+        "ai-council-script-browser-run-"
+    )
+    outcome: queue.Queue[tuple[str, object]] = queue.Queue()
+
+    source = b'''async def run(page, context):
+    import asyncio
+    await asyncio.sleep(30)
+    return {"unexpected": True}
+'''
+
+    def worker() -> None:
+        try:
+            value = execute_source(
+                name=f"host-signal-{signal_name.lower()}",
+                source=source,
+                max_runtime_seconds=(2 if expected_timeout else 10),
+            )
+        except BaseException as exc:
+            outcome.put(("error", exc))
+        else:
+            outcome.put(("result", value))
+
+    thread = threading.Thread(
+        target=worker,
+        name=f"browser-security-signal-{signal_name.lower()}",
+        daemon=True,
+    )
+    thread.start()
+
+    script_name = _wait_for_new_script_container(before=before)
+    run_id = script_name.removeprefix("ai-council-script-")
+    browser_name = f"ai-council-browser-{run_id}"
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if not _container_absent(browser_name):
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError(
+            f"Browser container did not appear for {signal_name}: "
+            f"{browser_name}"
+        )
+
+    completed = subprocess.run(
+        ["docker", "kill", "--signal", signal_name, script_name],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+        check=False,
+        shell=False,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"docker kill --signal {signal_name} failed: "
+            f"{completed.stderr.strip()}"
+        )
+
+    thread.join(timeout=20)
+    if thread.is_alive():
+        raise AssertionError(
+            f"Runtime host thread did not finish after {signal_name}."
+        )
+
+    try:
+        kind, value = outcome.get_nowait()
+    except queue.Empty as exc:
+        raise AssertionError("Signal probe produced no host outcome.") from exc
+
+    if kind != "error" or not isinstance(
+        value,
+        (BrowserRuntimeProtocolError, BrowserRuntimeExecutionError),
+    ):
+        raise AssertionError(
+            f"{signal_name} did not fail closed: {kind} {value!r}"
+        )
+
+    if expected_timeout:
+        if not isinstance(value, BrowserRuntimeExecutionError):
+            raise AssertionError(
+                f"{signal_name} timeout returned unexpected error type."
+            )
+        if (
+            value.attestation is None
+            or value.attestation.terminal_result.value != "timeout"
+        ):
+            raise AssertionError(
+                f"{signal_name} did not produce timeout attestation."
+            )
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if _container_absent(browser_name) and _container_absent(script_name):
+            return value
+        time.sleep(0.2)
+    raise AssertionError(
+        f"Containers remained after {signal_name}: "
+        f"{browser_name}, {script_name}"
     )
 
 
@@ -410,51 +561,54 @@ def main() -> int:
     )
     results["unsupported_rpc"] = "BLOCKED"
 
-    term_source = b'''async def run(page, context):
+    pid1_signal_source = b'''async def run(page, context):
     import os
     import signal
-    os.kill(1, signal.SIGTERM)
-    return {"survived": True}
+
+    outcome = {}
+    for name in ("SIGTERM", "SIGKILL", "SIGSTOP"):
+        try:
+            os.kill(1, getattr(signal, name))
+        except OSError as exc:
+            outcome[name] = "error:" + type(exc).__name__
+        else:
+            outcome[name] = "returned"
+    return {
+        "self_pid": os.getpid(),
+        "pid1_signal_outcomes": outcome,
+    }
 '''
     try:
-        term_result = execute_source(
-            name="signal-sigterm",
-            source=term_source,
+        pid1_result = execute_source(
+            name="pid1-internal-signal-semantics",
+            source=pid1_signal_source,
             max_runtime_seconds=5,
         )
     except (BrowserRuntimeProtocolError, BrowserRuntimeExecutionError):
-        results["script_pid1_sigterm"] = "FAIL_CLOSED"
+        results["pid1_internal_signal_semantics"] = "FAIL_CLOSED"
     else:
-        assert term_result.result == {"survived": True}
-        results["script_pid1_sigterm"] = "INEFFECTIVE_OR_HANDLED"
+        assert isinstance(pid1_result.result["self_pid"], int)
+        assert isinstance(
+            pid1_result.result["pid1_signal_outcomes"],
+            dict,
+        )
+        results["pid1_internal_signal_semantics"] = (
+            "KERNEL_RESTRICTED_OR_INEFFECTIVE"
+        )
 
-    _expect_fail_closed(
-        name="signal-sigkill",
-        source=b'''async def run(page, context):
-    import os
-    import signal
-    os.kill(1, signal.SIGKILL)
-    return {"unexpected": True}
-''',
+    _run_host_signal_probe(
+        signal_name="KILL",
+        expected_timeout=False,
     )
-    results["script_pid1_sigkill"] = "FAIL_CLOSED"
+    results["host_sigkill_script_runtime"] = "FAIL_CLOSED"
+    results["host_sigkill_cleanup"] = "PASS"
 
-    stop_exc = _expect_fail_closed(
-        name="signal-sigstop",
-        source=b'''async def run(page, context):
-    import os
-    import signal
-    os.kill(1, signal.SIGSTOP)
-    return {"unexpected": True}
-''',
-        max_runtime_seconds=2,
+    _run_host_signal_probe(
+        signal_name="STOP",
+        expected_timeout=True,
     )
-    assert isinstance(stop_exc, BrowserRuntimeExecutionError)
-    assert stop_exc.attestation is not None
-    assert stop_exc.attestation.terminal_result.value == "timeout"
-    _assert_run_containers_absent(stop_exc.attestation.run_id)
-    results["script_pid1_stop"] = "TIMEOUT_FAIL_CLOSED"
-    results["sigstop_cleanup"] = "PASS"
+    results["host_sigstop_script_runtime"] = "TIMEOUT_FAIL_CLOSED"
+    results["host_sigstop_cleanup"] = "PASS"
 
     timeout_exc = _expect_fail_closed(
         name="timeout-cleanup",
