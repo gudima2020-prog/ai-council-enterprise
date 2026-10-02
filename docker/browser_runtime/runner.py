@@ -15,7 +15,7 @@ from playwright.async_api import async_playwright
 
 
 SERVER_SCHEMA = "arch-browser-runtime-001.browser-server.v1"
-MAX_PROTOCOL_BYTES = 64 * 1024
+MAX_PROTOCOL_BYTES = 1024 * 1024
 _ALLOWED_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
 
 
