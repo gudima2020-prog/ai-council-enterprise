@@ -4,6 +4,7 @@ import asyncio
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import threading
 import time
@@ -561,7 +562,7 @@ def test_timeout_forces_both_containers_and_returns_attestation(
     ),
 )
 def test_malformed_host_protocol_fails_closed(line: str) -> None:
-    reader = _BoundedLineReader(io.StringIO(line), limit_bytes=4096)
+    reader = _BoundedLineReader(io.BytesIO(line.encode("utf-8")), limit_bytes=4096)
     service = BrowserRuntimeService()
     with pytest.raises(BrowserRuntimeProtocolError):
         service._read_any_object(reader, deadline=10**12)
@@ -570,13 +571,13 @@ def test_malformed_host_protocol_fails_closed(line: str) -> None:
 def test_bounded_line_reader_rejects_unterminated_overrun_with_bounded_read() -> None:
     calls: list[int] = []
 
-    class RecordingStream(io.StringIO):
-        def readline(self, size: int = -1) -> str:
+    class RecordingStream(io.BytesIO):
+        def readline(self, size: int = -1) -> bytes:
             calls.append(size)
             return super().readline(size)
 
     reader = _BoundedLineReader(
-        RecordingStream("x" * (128 * 1024)),
+        RecordingStream(b"x" * (128 * 1024)),
         limit_bytes=1024,
     )
 
@@ -587,9 +588,58 @@ def test_bounded_line_reader_rejects_unterminated_overrun_with_bounded_read() ->
     assert reader._queue.maxsize == 1
 
 
+def test_bounded_line_reader_rejects_unterminated_multibyte_utf8_by_bytes() -> None:
+    read_fd, write_fd = os.pipe()
+    reader_stream = os.fdopen(read_fd, "rb", buffering=0)
+    writer_stream = os.fdopen(write_fd, "wb", buffering=0)
+    try:
+        payload = "€".encode("utf-8") * 400
+        assert len(payload) == 1200
+        writer_stream.write(payload)
+        writer_stream.flush()
+
+        reader = _BoundedLineReader(reader_stream, limit_bytes=1024)
+        with pytest.raises(BrowserRuntimeProtocolError, match="exceeded limit"):
+            reader.read(timeout=1)
+        reader.close()
+    finally:
+        writer_stream.close()
+        reader_stream.close()
+
+
+def test_protocol_line_limit_counts_complete_utf8_wire_frame() -> None:
+    service = BrowserRuntimeService(
+        config=BrowserRuntimeConfig(protocol_line_limit_bytes=1024)
+    )
+    exact_value = {"x": "a" * 1015}
+    exact_wire = io.BytesIO()
+
+    service._write_object(exact_wire, exact_value, deadline=10**12)
+    wire_bytes = exact_wire.getvalue()
+    assert len(wire_bytes) == 1024
+    assert wire_bytes.endswith(b"\n")
+
+    reader = _BoundedLineReader(io.BytesIO(wire_bytes), limit_bytes=1024)
+    assert service._read_any_object(reader, deadline=10**12) == exact_value
+
+    overbound_reader = _BoundedLineReader(
+        io.BytesIO((b"x" * 1024) + b"\n"),
+        limit_bytes=1024,
+    )
+    with pytest.raises(BrowserRuntimeProtocolError, match="exceeded limit"):
+        overbound_reader.read(timeout=1)
+
+    with pytest.raises(BrowserRuntimeProtocolError, match="outbound line exceeded"):
+        service._write_object(
+            io.BytesIO(),
+            {"x": "a" * 1016},
+            deadline=10**12,
+        )
+
+
 def test_bounded_line_reader_close_releases_full_queue_pump() -> None:
     reader = _BoundedLineReader(
-        io.StringIO("{}\n{}\n{}\n"),
+        io.BytesIO(b"{}\n{}\n{}\n"),
         limit_bytes=1024,
     )
     deadline = time.monotonic() + 1
@@ -607,7 +657,7 @@ def test_protocol_write_obeys_shared_deadline() -> None:
     release = threading.Event()
 
     class BlockingStream:
-        def write(self, value: str) -> int:
+        def write(self, value: bytes) -> int:
             started.set()
             release.wait(timeout=2)
             return len(value)
@@ -636,7 +686,7 @@ def test_mediated_write_timeout_enters_container_cleanup(
     release = threading.Event()
 
     class BlockingStream:
-        def write(self, value: str) -> int:
+        def write(self, value: bytes) -> int:
             started.set()
             release.wait(timeout=2)
             return len(value)
@@ -663,8 +713,11 @@ def test_mediated_write_timeout_enters_container_cleanup(
         def poll(self):
             return None
 
-    browser_process = FakeProcess(stdin=io.StringIO(), stdout=io.StringIO(ready))
-    script_process = FakeProcess(stdin=BlockingStream(), stdout=io.StringIO())
+    browser_process = FakeProcess(
+        stdin=io.BytesIO(),
+        stdout=io.BytesIO(ready.encode("utf-8")),
+    )
+    script_process = FakeProcess(stdin=BlockingStream(), stdout=io.BytesIO())
     processes = iter((browser_process, script_process))
     removed: list[str] = []
 
@@ -709,7 +762,7 @@ def test_exact_protocol_shape_rejects_unknown_fields() -> None:
             "unexpected": True,
         }
     ) + "\n"
-    reader = _BoundedLineReader(io.StringIO(line), limit_bytes=4096)
+    reader = _BoundedLineReader(io.BytesIO(line.encode("utf-8")), limit_bytes=4096)
     with pytest.raises(BrowserRuntimeProtocolError):
         BrowserRuntimeService()._read_object(
             reader,

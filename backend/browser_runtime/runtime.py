@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Any, TextIO
+from typing import Any, BinaryIO
 from uuid import uuid4
 
 from backend.browser_runtime.contracts import (
@@ -101,6 +101,7 @@ class BrowserRuntimeConfig:
     script_cpu_limit: float = 0.5
     output_limit_bytes: int = 256 * 1024
     input_limit_bytes: int = 1024 * 1024
+    # Maximum complete UTF-8 protocol wire line, including the trailing LF.
     protocol_line_limit_bytes: int = 1024 * 1024
     max_rpc_requests: int = 256
     fixture_max_files: int = 256
@@ -157,7 +158,7 @@ class _MediatedOutcome:
 
 
 class _BoundedLineReader:
-    def __init__(self, stream: TextIO, *, limit_bytes: int) -> None:
+    def __init__(self, stream: BinaryIO, *, limit_bytes: int) -> None:
         self._stream = stream
         self._limit_bytes = limit_bytes
         self._queue: queue.Queue[tuple[str, str | None]] = queue.Queue(maxsize=1)
@@ -181,17 +182,24 @@ class _BoundedLineReader:
     def _pump(self) -> None:
         try:
             while not self._closed.is_set():
-                # ``readline()`` without a size bound can accumulate an
-                # attacker-controlled unterminated line in host memory.  A
-                # character cap of limit+1 is sufficient to detect every
-                # ASCII overrun; multi-byte UTF-8 is rejected by the exact
-                # byte check below and therefore cannot evade the byte limit.
-                line = self._stream.readline(self._limit_bytes + 1)
-                if line == "":
+                # Enforce the protocol line limit on raw wire bytes before
+                # UTF-8 decoding. ``BinaryIO.readline(size)`` interprets
+                # ``size`` as bytes, so an unterminated multi-byte line is
+                # rejected as soon as the (limit + 1)th byte arrives.
+                raw_line = self._stream.readline(self._limit_bytes + 1)
+                if raw_line == b"":
                     self._emit(("eof", None))
                     return
-                if len(line.encode("utf-8", errors="replace")) > self._limit_bytes:
+                if len(raw_line) > self._limit_bytes:
                     self._emit(("oversized", None))
+                    return
+                if not raw_line.endswith(b"\n"):
+                    self._emit(("error", None))
+                    return
+                try:
+                    line = raw_line.decode("utf-8")
+                except UnicodeDecodeError:
+                    self._emit(("error", None))
                     return
                 if not self._emit(("line", line)):
                     return
@@ -657,16 +665,13 @@ class BrowserRuntimeService:
             str(self.config.output_limit_bytes),
         ]
 
-    def _start_process(self, command: list[str]) -> subprocess.Popen[str]:
+    def _start_process(self, command: list[str]) -> subprocess.Popen[bytes]:
         return subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
+            text=False,
             shell=False,
         )
 
@@ -681,8 +686,8 @@ class BrowserRuntimeService:
         script_container: str,
     ) -> _MediatedOutcome:
         deadline = time.monotonic() + timeout_seconds
-        browser_process: subprocess.Popen[str] | None = None
-        script_process: subprocess.Popen[str] | None = None
+        browser_process: subprocess.Popen[bytes] | None = None
+        script_process: subprocess.Popen[bytes] | None = None
         browser_reader: _BoundedLineReader | None = None
         script_reader: _BoundedLineReader | None = None
         try:
@@ -934,12 +939,12 @@ class BrowserRuntimeService:
 
     def _write_object(
         self,
-        stream: TextIO,
+        stream: BinaryIO,
         value: dict[str, Any],
         deadline: float,
     ) -> None:
-        encoded = canonical_json(value)
-        if len(encoded.encode("utf-8")) > self.config.protocol_line_limit_bytes:
+        wire_line = canonical_json(value).encode("utf-8") + b"\n"
+        if len(wire_line) > self.config.protocol_line_limit_bytes:
             raise BrowserRuntimeProtocolError(
                 "Runtime protocol outbound line exceeded limit."
             )
@@ -947,7 +952,7 @@ class BrowserRuntimeService:
 
         def worker() -> None:
             try:
-                stream.write(encoded + "\n")
+                stream.write(wire_line)
                 stream.flush()
             except BaseException as exc:  # fail closed across the thread boundary
                 outcome.put(exc)
