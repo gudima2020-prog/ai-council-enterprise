@@ -302,7 +302,11 @@ successful Docker inventory reports the exact container name absent. A failed
 remove command or removal exception raises a cleanup error even when inventory
 independently confirms absence. Inventory failure or a still-present container
 also raises a cleanup error. Cleanup tries both containers even if the first
-removal cannot be confirmed. There is no retry or host execution fallback.
+removal cannot be confirmed. `_execute_mediated()` owns cleanup for processes
+started during mediation; `execute()` adds the failure attestation after that
+cleanup and does not repeat removal for the same run. A successful cleanup
+preserves the original timeout or typed protocol error. There is no retry or
+host execution fallback.
 
 ## Explicit preparation
 

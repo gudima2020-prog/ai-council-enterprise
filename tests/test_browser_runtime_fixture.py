@@ -531,10 +531,18 @@ def test_timeout_forces_both_containers_and_returns_attestation(
         "_inspect_trusted_images",
         lambda self: images,
     )
+
+    def timeout_after_cleanup(self, **kwargs):
+        self._force_remove_containers(
+            kwargs["browser_container"],
+            kwargs["script_container"],
+        )
+        raise _MediatedTimeout()
+
     monkeypatch.setattr(
         BrowserRuntimeService,
         "_execute_mediated",
-        lambda self, **kwargs: (_ for _ in ()).throw(_MediatedTimeout()),
+        timeout_after_cleanup,
     )
     monkeypatch.setattr(
         BrowserRuntimeService,
@@ -555,6 +563,7 @@ def test_timeout_forces_both_containers_and_returns_attestation(
     assert attestation is not None
     assert attestation.terminal_result.value == "timeout"
     assert attestation.failure_class == "runtime_timeout"
+    assert len(removed) == 2
     assert len(set(removed)) == 2
 
 
@@ -569,21 +578,28 @@ def test_protocol_stage_and_reason_survive_attestation_wrapping(
         "_inspect_trusted_images",
         lambda self: images,
     )
+    removed: list[str] = []
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_force_remove_container",
+        lambda self, name: removed.append(name),
+    )
+
+    def reject_protocol_after_cleanup(self, **kwargs):
+        self._force_remove_containers(
+            kwargs["browser_container"],
+            kwargs["script_container"],
+        )
+        raise BrowserRuntimeProtocolError(
+            "Unsupported script protocol message.",
+            protocol_stage="script_message_dispatch",
+            protocol_reason="unsupported_message_type",
+        )
+
     monkeypatch.setattr(
         BrowserRuntimeService,
         "_execute_mediated",
-        lambda self, **kwargs: (_ for _ in ()).throw(
-            BrowserRuntimeProtocolError(
-                "Unsupported script protocol message.",
-                protocol_stage="script_message_dispatch",
-                protocol_reason="unsupported_message_type",
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        BrowserRuntimeService,
-        "_force_remove_containers",
-        lambda self, *names: None,
+        reject_protocol_after_cleanup,
     )
 
     with pytest.raises(BrowserRuntimeProtocolError) as caught:
@@ -599,6 +615,8 @@ def test_protocol_stage_and_reason_survive_attestation_wrapping(
     assert caught.value.attestation.failure_class == BrowserRuntimeProtocolError.code
     assert caught.value.protocol_stage == "script_message_dispatch"
     assert caught.value.protocol_reason == "unsupported_message_type"
+    assert len(removed) == 2
+    assert len(set(removed)) == 2
 
 
 @pytest.mark.parametrize(

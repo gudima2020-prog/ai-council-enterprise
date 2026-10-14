@@ -63,6 +63,19 @@ blockers. The next candidate must be checked specifically for all three:
    values must result in `BrowserRuntimeProtocolError`, fail-closed cleanup,
    and a typed runtime-error attestation rather than an uncaught `TypeError`.
 
+Security Review of revision
+`de534f9e980b2dfba8cb16cd9cd56315608e6f41` returned `FAIL` with blocker
+`SEC-NEW-01`. The next candidate must be checked specifically for this finding:
+
+4. **SEC-NEW-01 — cleanup ownership and original error preservation:** each
+   mediated error path must perform one controlled removal attempt per active
+   container. The outer `execute()` error mapping must not repeat cleanup that
+   `_execute_mediated()` has already completed. When cleanup succeeds, timeout
+   and protocol failures must retain their original typed error, failure
+   attestation, and protocol stage/reason. Cleanup command or inventory errors
+   must still fail closed. Regression tests must cover protocol and timeout
+   paths and assert exact removal counts as well as preserved error metadata.
+
 ## Candidate identity
 
 Exact revision/tree/base/bundle hashes are supplied in the immutable review

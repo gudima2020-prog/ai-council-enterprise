@@ -368,10 +368,6 @@ class BrowserRuntimeService:
                     script_container=script_container,
                 )
             except _MediatedTimeout as exc:
-                self._force_remove_containers(
-                    browser_container,
-                    script_container,
-                )
                 finished = datetime.now(timezone.utc)
                 attestation = self._attestation(
                     spec=spec,
@@ -391,10 +387,6 @@ class BrowserRuntimeService:
                     "Docker CLI is unavailable."
                 ) from exc
             except BrowserRuntimeError as exc:
-                self._force_remove_containers(
-                    browser_container,
-                    script_container,
-                )
                 if exc.attestation is not None:
                     raise
                 finished = datetime.now(timezone.utc)
