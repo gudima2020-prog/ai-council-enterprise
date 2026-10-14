@@ -63,6 +63,9 @@ class BrowserRuntimeError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.attestation = attestation
+        # Secondary cleanup failures must remain observable without replacing
+        # the primary execution/protocol failure.
+        self.cleanup_failures: tuple[str, ...] = ()
 
 
 class BrowserRuntimeBindingError(BrowserRuntimeError):
@@ -324,6 +327,7 @@ class BrowserRuntimeService:
         )
         script_root.mkdir(mode=self._staging_directory_mode())
 
+        primary_error: BaseException | None = None
         try:
             script_path = script_root / "script.py"
             script_path.write_bytes(source_bytes)
@@ -407,15 +411,41 @@ class BrowserRuntimeService:
                         protocol_reason=exc.protocol_reason,
                     ) from exc
                 raise type(exc)(str(exc), attestation=attestation) from exc
+        except BaseException as exc:
+            primary_error = exc
+            raise
         finally:
             try:
                 shutil.rmtree(script_root)
             except FileNotFoundError:
                 pass
-            except OSError as exc:
-                raise BrowserRuntimeExecutionError(
-                    "Browser runtime source staging cleanup failed."
-                ) from exc
+            except OSError as cleanup_exc:
+                if primary_error is not None:
+                    if isinstance(primary_error, BrowserRuntimeError):
+                        primary_error.cleanup_failures = (
+                            *primary_error.cleanup_failures,
+                            "source_staging_cleanup_failed",
+                        )
+                    if hasattr(primary_error, "add_note"):
+                        primary_error.add_note(
+                            "Secondary failure: browser runtime source staging "
+                            "cleanup failed (OSError)."
+                        )
+                else:
+                    finished = datetime.now(timezone.utc)
+                    attestation = self._attestation(
+                        spec=spec,
+                        run_id=run_id,
+                        image_digest=images.browser_digest,
+                        started=started,
+                        finished=finished,
+                        terminal_result=BrowserTerminalResult.FAILED,
+                        failure_class=BrowserRuntimeCleanupError.code,
+                    )
+                    raise BrowserRuntimeCleanupError(
+                        "Browser runtime source staging cleanup failed.",
+                        attestation=attestation,
+                    ) from cleanup_exc
 
         finished = datetime.now(timezone.utc)
         attestation = self._attestation(

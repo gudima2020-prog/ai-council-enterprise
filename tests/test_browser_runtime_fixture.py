@@ -619,6 +619,131 @@ def test_protocol_stage_and_reason_survive_attestation_wrapping(
     assert len(set(removed)) == 2
 
 
+def test_staging_cleanup_failure_preserves_primary_protocol_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: fake_images(),
+    )
+
+    def reject_protocol(self, **kwargs):
+        raise BrowserRuntimeProtocolError(
+            "Unsupported script protocol message.",
+            protocol_stage="script_message_dispatch",
+            protocol_reason="unsupported_message_type",
+        )
+
+    def fail_staging_cleanup(path):
+        raise PermissionError("simulated staging cleanup failure")
+
+    monkeypatch.setattr(BrowserRuntimeService, "_execute_mediated", reject_protocol)
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.shutil.rmtree",
+        fail_staging_cleanup,
+    )
+
+    with pytest.raises(BrowserRuntimeProtocolError) as caught:
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=spec(raw_input),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+    assert caught.value.attestation is not None
+    assert caught.value.attestation.failure_class == BrowserRuntimeProtocolError.code
+    assert caught.value.protocol_stage == "script_message_dispatch"
+    assert caught.value.protocol_reason == "unsupported_message_type"
+    assert caught.value.cleanup_failures == ("source_staging_cleanup_failed",)
+    assert any("source staging cleanup failed" in note for note in caught.value.__notes__)
+
+
+def test_staging_cleanup_failure_after_success_fails_with_attestation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: fake_images(),
+    )
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_execute_mediated",
+        lambda self, **kwargs: SimpleNamespace(
+            result={"status": "ready"},
+            browser_version="140.0.0.0",
+            automation_runtime_version="1.55.0",
+        ),
+    )
+
+    def fail_staging_cleanup(path):
+        raise PermissionError("simulated staging cleanup failure")
+
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.shutil.rmtree",
+        fail_staging_cleanup,
+    )
+
+    with pytest.raises(BrowserRuntimeCleanupError) as caught:
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=spec(raw_input),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+    assert caught.value.attestation is not None
+    assert caught.value.attestation.terminal_result.value == "failed"
+    assert caught.value.attestation.failure_class == BrowserRuntimeCleanupError.code
+    assert isinstance(caught.value.__cause__, PermissionError)
+
+
+def test_staging_cleanup_failure_preserves_timeout_attestation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: fake_images(),
+    )
+
+    def timeout(self, **kwargs):
+        raise _MediatedTimeout()
+
+    def fail_staging_cleanup(path):
+        raise PermissionError("simulated staging cleanup failure")
+
+    monkeypatch.setattr(BrowserRuntimeService, "_execute_mediated", timeout)
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.shutil.rmtree",
+        fail_staging_cleanup,
+    )
+
+    with pytest.raises(BrowserRuntimeExecutionError) as caught:
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=spec(raw_input),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+    assert caught.value.attestation is not None
+    assert caught.value.attestation.terminal_result.value == "timeout"
+    assert caught.value.attestation.failure_class == "runtime_timeout"
+    assert caught.value.cleanup_failures == ("source_staging_cleanup_failed",)
+
+
 @pytest.mark.parametrize(
     "line",
     (

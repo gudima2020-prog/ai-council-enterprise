@@ -308,6 +308,12 @@ cleanup and does not repeat removal for the same run. A successful cleanup
 preserves the original timeout or typed protocol error. There is no retry or
 host execution fallback.
 
+Source-staging cleanup is also fail-closed. If staging removal fails after a
+primary runtime error, the original error type and attestation remain primary;
+the error records `source_staging_cleanup_failed` as a secondary cleanup
+failure. If execution otherwise succeeded, staging-removal failure raises a
+typed cleanup error with a failure attestation instead of returning success.
+
 ## Explicit preparation
 
 `prepare_arch_browser_runtime_001.bat` now:

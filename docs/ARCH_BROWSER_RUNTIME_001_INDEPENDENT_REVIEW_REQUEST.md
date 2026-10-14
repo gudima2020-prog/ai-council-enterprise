@@ -73,8 +73,13 @@ Security Review of revision
    `_execute_mediated()` has already completed. When cleanup succeeds, timeout
    and protocol failures must retain their original typed error, failure
    attestation, and protocol stage/reason. Cleanup command or inventory errors
-   must still fail closed. Regression tests must cover protocol and timeout
-   paths and assert exact removal counts as well as preserved error metadata.
+   must still fail closed. Source-staging cleanup failure must not replace a
+   primary protocol/timeout error or erase its attestation; the secondary
+   cleanup failure must remain observable. If staging cleanup fails after an
+   otherwise successful execution, the runtime must return a typed cleanup
+   failure with an attestation, never success. Regression tests must cover
+   protocol, timeout, and successful-execution staging-cleanup paths and assert
+   exact removal counts as well as preserved error metadata.
 
 ## Candidate identity
 
