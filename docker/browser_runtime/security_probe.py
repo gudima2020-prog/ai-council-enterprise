@@ -4,11 +4,13 @@ import json
 import os
 from pathlib import Path
 import queue
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from typing import Any
+from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -56,6 +58,8 @@ def execute_source(
     source: bytes,
     raw_input: object | None = None,
     max_runtime_seconds: int = 30,
+    fixture_root: Path = FIXTURE,
+    service: BrowserRuntimeService | None = None,
 ):
     input_value = raw_input if raw_input is not None else {"probe": name}
     artifact = BrowserScriptArtifact(
@@ -87,12 +91,13 @@ def execute_source(
         effects=(BrowserEffect.BROWSER_READ,),
         requested_evidence=("structured_result",),
     )
-    return runtime().execute(
+    selected_runtime = service if service is not None else runtime()
+    return selected_runtime.execute(
         artifact=artifact,
         spec=spec,
         source_bytes=source,
         raw_input=input_value,
-        fixture_root=FIXTURE,
+        fixture_root=fixture_root,
     )
 
 
@@ -111,6 +116,28 @@ def _expect_fail_closed(
     except (BrowserRuntimeProtocolError, BrowserRuntimeExecutionError) as exc:
         return exc
     raise AssertionError(f"{name} unexpectedly completed successfully.")
+
+
+def _is_short_line_flood_host_rejection(exc: Exception) -> bool:
+    return (
+        isinstance(exc, BrowserRuntimeProtocolError)
+        and exc.protocol_stage == "script_message_dispatch"
+        and exc.protocol_reason == "unsupported_message_type"
+        and exc.attestation is not None
+        and exc.attestation.failure_class == BrowserRuntimeProtocolError.code
+    )
+
+
+def _build_protocol_flood_source(payload_expression: str) -> bytes:
+    return (
+        "async def run(page, context):\n"
+        "    import os, time\n"
+        "    protocol = getattr(page, '_PageProxy__protocol')\n"
+        f"    data = {payload_expression}\n"
+        "    while data:\n"
+        "        data = data[os.write(protocol._output_fd, data):]\n"
+        "    time.sleep(30)\n"
+    ).encode()
 
 
 def _container_absent(name: str) -> bool:
@@ -148,6 +175,62 @@ def _assert_run_containers_absent(run_id: str) -> None:
     raise AssertionError(
         f"Runtime containers still present after cleanup: {browser}, {script}"
     )
+
+
+def _run_large_response_nonreader_probe() -> None:
+    class ObservedRuntime(BrowserRuntimeService):
+        large_response_seen = False
+        response_started: float | None = None
+
+        def _write_object(self, stream, value, deadline):
+            if (
+                value.get("type") == "response"
+                and value.get("ok") is True
+                and isinstance(value.get("result"), str)
+                and len(value["result"]) >= 512 * 1024
+            ):
+                self.large_response_seen = True
+                self.response_started = time.monotonic()
+            return super()._write_object(stream, value, deadline)
+
+    service = ObservedRuntime(config=runtime().config)
+    root = FIXTURE.parent / f".nonreader-fixture-{uuid4().hex}"
+    root.mkdir()
+    try:
+        (root / "index.html").write_text(
+            "<html><body>" + "X" * (512 * 1024) + "</body></html>",
+            encoding="utf-8",
+        )
+        try:
+            execute_source(
+                name="large-response-nonreader",
+                source=b'''async def run(page, context):
+    import time
+    await page.goto(context["fixture_origin"] + "/")
+    protocol = getattr(page, "_PageProxy__protocol")
+    protocol.emit({
+        "schema_version": "arch-browser-runtime-001.script-runner.v1",
+        "type": "request", "id": protocol._next_id,
+        "op": "locator_inner_text", "args": {"selector": "body"},
+    })
+    time.sleep(60)
+''',
+                fixture_root=root,
+                service=service,
+                max_runtime_seconds=10,
+            )
+        except BrowserRuntimeExecutionError as exc:
+            assert service.large_response_seen, "Large response stage was not reached."
+            assert exc.attestation is not None
+            assert exc.attestation.terminal_result.value == "timeout"
+            assert service.response_started is not None
+            # Includes up to 10s execution and up to four 15s cleanup attempts.
+            assert time.monotonic() - service.response_started < 75
+            _assert_run_containers_absent(exc.attestation.run_id)
+        else:
+            raise AssertionError("Non-reading peer unexpectedly completed.")
+    finally:
+        shutil.rmtree(root)
 
 
 def _running_container_names(prefix: str) -> set[str]:
@@ -635,6 +718,49 @@ def main() -> int:
     _assert_run_containers_absent(timeout_exc.attestation.run_id)
     results["timeout_cleanup"] = "PASS"
 
+    for name, payload_expression in (
+        ("unterminated-protocol-flood", "b'X' * (2 * 1024 * 1024)"),
+        ("short-line-protocol-flood", "b'{}\\n' * 10000"),
+    ):
+        source = _build_protocol_flood_source(payload_expression)
+        try:
+            compile(source.decode("utf-8"), f"<{name}>", "exec")
+        except (UnicodeDecodeError, SyntaxError) as exc:
+            raise AssertionError(
+                f"{name} payload did not compile before execution."
+            ) from exc
+        probe_started = time.monotonic()
+        exc = _expect_fail_closed(name=name, source=source)
+        assert exc.attestation is not None
+        _assert_run_containers_absent(exc.attestation.run_id)
+        elapsed = time.monotonic() - probe_started
+        assert elapsed < 75, f"{name} exceeded the bounded fail-closed window."
+        if name == "short-line-protocol-flood":
+            assert _is_short_line_flood_host_rejection(exc), (
+                "short-line flood did not reach the host script-message "
+                "validator with the expected rejection marker; "
+                f"observed type={type(exc).__name__}, "
+                f"stage={getattr(exc, 'protocol_stage', None)}, "
+                f"reason={getattr(exc, 'protocol_reason', None)}."
+            )
+            results["short_line_flood_host_stage"] = exc.protocol_stage
+            results["short_line_flood_host_reason"] = exc.protocol_reason
+        if isinstance(exc, BrowserRuntimeProtocolError):
+            outcome = "PROTOCOL_REJECTED"
+        elif isinstance(exc, BrowserRuntimeExecutionError):
+            outcome = (
+                "TIMEOUT_FAIL_CLOSED"
+                if exc.attestation.terminal_result.value == "timeout"
+                else "EXECUTION_FAIL_CLOSED"
+            )
+        else:
+            raise AssertionError(f"{name} returned an unexpected exception type.")
+        results[name.replace("-", "_")] = outcome + "_AND_CLEANED"
+
+    _run_large_response_nonreader_probe()
+    results["large_response_nonreader"] = "TIMEOUT_FAIL_CLOSED"
+    results["large_response_nonreader_cleanup"] = "PASS"
+
     results["ok"] = True
     print(
         json.dumps(
@@ -643,7 +769,7 @@ def main() -> int:
             separators=(",", ":"),
         )
     )
-    print("ARCH_BROWSER_RUNTIME_001_MEDIATED_SECURITY_PROBE_V2=PASS")
+    print("ARCH_BROWSER_RUNTIME_001_MEDIATED_SECURITY_PROBE_V3=PASS")
     return 0
 
 

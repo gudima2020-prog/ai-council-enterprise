@@ -21,9 +21,52 @@ Historical frozen revision
 The remediation candidate must be judged specifically on whether those blockers
 are actually removed, not merely renamed or hidden.
 
+## Previous V3 review findings requiring explicit re-test
+
+The review of V3 revision
+`c06622e88f9f4f6ead3071ab3a299133628fad6c` returned `FAIL` with four findings.
+The next candidate must be checked specifically for all four:
+
+1. Runtime configuration accepted `uid:gid` values with either component equal
+   to zero. Confirm UID 0 and GID 0 are rejected before Docker command creation.
+2. `_validate_profile()` accepted arbitrary `requested_capabilities` alongside
+   `effects=(browser_read,)`. Confirm an explicit allowlist and consistent
+   capability/effect validation run before image inspection or execution.
+3. `_force_remove_container()` ignored `docker rm --force` return codes.
+   Confirm both removal attempts are made, container absence is independently
+   established using a successful Docker inventory, inventory errors fail
+   closed, and cleanup is not reported successful while either container is
+   present or its state is unknown.
+4. The short-line flood probe could generate invalid Python source, and generic
+   script-execution failure was accepted as success. Confirm the generated
+   payload compiles before execution and that the probe requires evidence that
+   the flood reached host protocol validation.
+
+## Fresh Security Review findings requiring explicit re-test
+
+Security Review of revision
+`8cadc551da98bdaca4df674026ece060f0fb3434` returned `FAIL` with three
+blockers. The next candidate must be checked specifically for all three:
+
+1. **SEC-B03 — cleanup command errors:** a nonzero `docker rm --force` result,
+   `OSError`, or timeout must fail cleanup even if a later successful inventory
+   reports the exact container absent. Inventory must still be attempted, and
+   both container removals must be attempted even if the first fails.
+2. **SEC-B04 — short-line proof:** the probe must require host-generated,
+   stage-specific evidence that the flood's first short line reached the script
+   message dispatcher and was rejected there. A generic protocol exception,
+   browser-ready error, script startup failure, or exception class alone is not
+   sufficient. Preserve and check the stage/reason marker through runtime error
+   attestation wrapping.
+3. **SEC-B05 — RPC operation type:** validate `op` is a string before set
+   membership. Object, array, null, numeric, and other non-string operation
+   values must result in `BrowserRuntimeProtocolError`, fail-closed cleanup,
+   and a typed runtime-error attestation rather than an uncaught `TypeError`.
+
 ## Candidate identity
 
-Exact revision/tree/base/bundle hashes are supplied in the frozen review bundle.
+Exact revision/tree/base/bundle hashes are supplied in the immutable review
+bundle.
 
 Verify independently before behavioral review.
 
@@ -61,6 +104,9 @@ no credential scopes
 browser_read only
 no external origins
 ```
+
+Also confirm `requested_capabilities` has an explicit allowlist for this
+runtime profile and is consistent with `effects=(browser_read,)`.
 
 Unsupported profiles must fail before image execution.
 
@@ -104,6 +150,9 @@ Confirm **both** containers use:
 - no credentials/secrets/browser-profile mounts.
 
 Browser container may mount only the fixture root read-only.
+
+Attempt configuration with `0:0`, `0:<nonzero>` and `<nonzero>:0`; each must
+fail before either Docker command is built.
 
 Script container may mount only the frozen source staging directory read-only.
 
@@ -241,6 +290,10 @@ Confirm:
 Confirm unique names for both containers.
 
 On timeout both must receive forced-removal attempts.
+Independently simulate `docker rm --force` nonzero status, inventory failure,
+and each container remaining present. Cleanup must fail closed unless a
+successful inventory confirms both exact names are absent. Verify the second
+removal is attempted even when the first cannot be confirmed.
 
 Check no host fallback/retry exists.
 
@@ -282,6 +335,18 @@ run adversarial scripts against the exact built image digests.
 
 If Docker is unavailable, state that explicitly and do not claim Docker
 reproduction.
+
+For bounded-I/O and strict-protocol changes, also inspect the V3 Docker probe
+and independently verify oversized unterminated input, short-line floods, a
+peer that does not read a large response, duplicate JSON keys, non-finite
+numbers, exact response IDs and consistent `ok`/`result`/`error_code` shapes.
+Compile the generated short-line-flood Python source before execution and
+require the observed failure to come from host protocol validation; syntax or
+generic script startup errors are not a successful probe. Require the exact
+host-generated script-message stage/reason marker in the protocol exception and
+attestation. Check that Docker inventory errors cannot be treated as proof of
+cleanup and that Docker removal errors fail closed even if inventory shows the
+container absent.
 
 ## Required output
 

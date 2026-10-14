@@ -26,6 +26,7 @@ from backend.browser_runtime.contracts import (
 
 from backend.browser_runtime.runtime import (
     BrowserRuntimeBindingError,
+    BrowserRuntimeCleanupError,
     BrowserRuntimeConfig,
     BrowserRuntimeError,
     BrowserRuntimeExecutionError,
@@ -74,6 +75,7 @@ __all__ = [
     "fingerprint_payload",
     "sha256_bytes",
     "BrowserRuntimeBindingError",
+    "BrowserRuntimeCleanupError",
     "BrowserRuntimeConfig",
     "BrowserRuntimeError",
     "BrowserRuntimeExecutionError",

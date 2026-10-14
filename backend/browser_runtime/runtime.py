@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -87,6 +88,22 @@ class BrowserRuntimeExecutionError(BrowserRuntimeError):
 class BrowserRuntimeProtocolError(BrowserRuntimeError):
     code = "browser_runtime_protocol_error"
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        attestation: BrowserRuntimeAttestation | None = None,
+        protocol_stage: str | None = None,
+        protocol_reason: str | None = None,
+    ) -> None:
+        super().__init__(message, attestation=attestation)
+        self.protocol_stage = protocol_stage
+        self.protocol_reason = protocol_reason
+
+
+class BrowserRuntimeCleanupError(BrowserRuntimeError):
+    code = "browser_runtime_cleanup_error"
+
 
 class _MediatedTimeout(RuntimeError):
     pass
@@ -134,6 +151,9 @@ class BrowserRuntimeConfig:
             raise ValueError("tmpfs_size_mb must be 16..2048.")
         if not re.fullmatch(r"[0-9]+:[0-9]+", self.user):
             raise ValueError("BrowserRuntime user must be numeric uid:gid.")
+        uid_text, gid_text = self.user.split(":", 1)
+        if int(uid_text) == 0 or int(gid_text) == 0:
+            raise ValueError("BrowserRuntime uid and gid must both be non-root.")
 
 
 @dataclass(frozen=True)
@@ -155,6 +175,42 @@ class _MediatedOutcome:
     result: Any
     browser_version: str
     automation_runtime_version: str
+
+
+def _strict_json_object(line: str) -> dict[str, Any]:
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate JSON object key")
+            value[key] = item
+        return value
+
+    def reject_constant(value: str) -> Any:
+        raise ValueError(f"non-finite JSON constant: {value}")
+
+    def finite_float(value: str) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("non-finite JSON number")
+        return number
+
+    try:
+        value = json.loads(
+            line,
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+            parse_float=finite_float,
+        )
+    except (ValueError, RecursionError) as exc:
+        raise BrowserRuntimeProtocolError(
+            "Runtime protocol returned invalid JSON."
+        ) from exc
+    if not isinstance(value, dict):
+        raise BrowserRuntimeProtocolError(
+            "Runtime protocol envelope must be an object."
+        )
+    return value
 
 
 class _BoundedLineReader:
@@ -312,8 +368,10 @@ class BrowserRuntimeService:
                     script_container=script_container,
                 )
             except _MediatedTimeout as exc:
-                self._force_remove_container(browser_container)
-                self._force_remove_container(script_container)
+                self._force_remove_containers(
+                    browser_container,
+                    script_container,
+                )
                 finished = datetime.now(timezone.utc)
                 attestation = self._attestation(
                     spec=spec,
@@ -333,8 +391,10 @@ class BrowserRuntimeService:
                     "Docker CLI is unavailable."
                 ) from exc
             except BrowserRuntimeError as exc:
-                self._force_remove_container(browser_container)
-                self._force_remove_container(script_container)
+                self._force_remove_containers(
+                    browser_container,
+                    script_container,
+                )
                 if exc.attestation is not None:
                     raise
                 finished = datetime.now(timezone.utc)
@@ -347,6 +407,13 @@ class BrowserRuntimeService:
                     terminal_result=BrowserTerminalResult.FAILED,
                     failure_class=exc.code,
                 )
+                if isinstance(exc, BrowserRuntimeProtocolError):
+                    raise BrowserRuntimeProtocolError(
+                        str(exc),
+                        attestation=attestation,
+                        protocol_stage=exc.protocol_stage,
+                        protocol_reason=exc.protocol_reason,
+                    ) from exc
                 raise type(exc)(str(exc), attestation=attestation) from exc
         finally:
             try:
@@ -438,6 +505,16 @@ class BrowserRuntimeService:
         if spec.effects != (BrowserEffect.BROWSER_READ,):
             raise BrowserRuntimeProfileError(
                 "RUNTIME-001 supports browser_read only."
+            )
+        capabilities = frozenset(spec.requested_capabilities)
+        allowed_capabilities = frozenset({"browser.execute", "browser.read"})
+        if not capabilities.issubset(allowed_capabilities):
+            raise BrowserRuntimeProfileError(
+                "RUNTIME-001 supports browser.execute and browser.read capabilities only."
+            )
+        if "browser.execute" in capabilities and "browser.read" not in capabilities:
+            raise BrowserRuntimeProfileError(
+                "browser.execute requires browser.read in this profile."
             )
         if spec.requested_navigation_origins:
             raise BrowserRuntimeProfileError(
@@ -769,6 +846,12 @@ class BrowserRuntimeService:
                         raise BrowserRuntimeProtocolError(
                             "Script request id is invalid."
                         )
+                    if not isinstance(message["op"], str):
+                        raise BrowserRuntimeProtocolError(
+                            "Script requested an operation with an invalid type.",
+                            protocol_stage="script_rpc_validation",
+                            protocol_reason="invalid_operation_type",
+                        )
                     if message["op"] not in _ALLOWED_RPC_OPS:
                         raise BrowserRuntimeProtocolError(
                             "Script requested unsupported browser operation."
@@ -796,34 +879,7 @@ class BrowserRuntimeService:
                         deadline,
                     )
                     response = self._read_any_object(browser_reader, deadline)
-                    if set(response) not in (
-                        {
-                            "schema_version",
-                            "type",
-                            "id",
-                            "ok",
-                            "result",
-                        },
-                        {
-                            "schema_version",
-                            "type",
-                            "id",
-                            "ok",
-                            "error_code",
-                        },
-                    ):
-                        raise BrowserRuntimeProtocolError(
-                            "Browser response envelope shape mismatch."
-                        )
-                    if (
-                        response.get("schema_version") != BROWSER_SERVER_SCHEMA_VERSION
-                        or response.get("type") != "response"
-                        or response.get("id") != expected_id
-                        or not isinstance(response.get("ok"), bool)
-                    ):
-                        raise BrowserRuntimeProtocolError(
-                            "Browser response envelope is invalid."
-                        )
+                    self._validate_browser_response(response, expected_id)
                     self._write_object(script_process.stdin, response, deadline)
                     expected_id += 1
                     continue
@@ -893,17 +949,22 @@ class BrowserRuntimeService:
                     )
 
                 raise BrowserRuntimeProtocolError(
-                    "Unsupported script protocol message."
+                    "Unsupported script protocol message.",
+                    protocol_stage="script_message_dispatch",
+                    protocol_reason="unsupported_message_type",
                 )
         finally:
             if browser_reader is not None:
                 browser_reader.close()
             if script_reader is not None:
                 script_reader.close()
+            containers_to_remove = []
             if browser_process is not None and browser_process.poll() is None:
-                self._force_remove_container(browser_container)
+                containers_to_remove.append(browser_container)
             if script_process is not None and script_process.poll() is None:
-                self._force_remove_container(script_container)
+                containers_to_remove.append(script_container)
+            if containers_to_remove:
+                self._force_remove_containers(*containers_to_remove)
 
     def _read_any_object(
         self,
@@ -911,17 +972,34 @@ class BrowserRuntimeService:
         deadline: float,
     ) -> dict[str, Any]:
         line = reader.read(self._remaining(deadline))
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError as exc:
+        return _strict_json_object(line)
+
+    def _validate_browser_response(
+        self,
+        response: dict[str, Any],
+        expected_id: int,
+    ) -> None:
+        common = {"schema_version", "type", "id", "ok"}
+        ok = response.get("ok")
+        expected_fields = common | ({"result"} if ok is True else {"error_code"})
+        if set(response) != expected_fields:
             raise BrowserRuntimeProtocolError(
-                "Runtime protocol returned malformed JSON."
-            ) from exc
-        if not isinstance(value, dict):
-            raise BrowserRuntimeProtocolError(
-                "Runtime protocol envelope must be an object."
+                "Browser response envelope shape mismatch."
             )
-        return value
+        if (
+            response.get("schema_version") != BROWSER_SERVER_SCHEMA_VERSION
+            or response.get("type") != "response"
+            or type(response.get("id")) is not int
+            or response["id"] != expected_id
+            or not isinstance(ok, bool)
+        ):
+            raise BrowserRuntimeProtocolError(
+                "Browser response envelope is invalid."
+            )
+        if ok is False and not self._valid_error_code(response["error_code"]):
+            raise BrowserRuntimeProtocolError(
+                "Browser response error code is invalid."
+            )
 
     def _read_object(
         self,
@@ -1000,9 +1078,23 @@ class BrowserRuntimeService:
         except subprocess.TimeoutExpired as exc:
             raise _MediatedTimeout from exc
 
+    def _force_remove_containers(self, *container_names: str) -> None:
+        failures: list[BrowserRuntimeCleanupError] = []
+        for container_name in container_names:
+            try:
+                self._force_remove_container(container_name)
+            except BrowserRuntimeCleanupError as exc:
+                failures.append(exc)
+        if failures:
+            names = ", ".join(container_names)
+            raise BrowserRuntimeCleanupError(
+                "Could not confirm forced removal of runtime container(s): "
+                f"{names}."
+            ) from failures[0]
+
     def _force_remove_container(self, container_name: str) -> None:
         try:
-            subprocess.run(
+            removed = subprocess.run(
                 [
                     self.config.docker_binary,
                     "rm",
@@ -1017,8 +1109,65 @@ class BrowserRuntimeService:
                 check=False,
                 shell=False,
             )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            remove_error: Exception | None = exc
+            removed = None
+        else:
+            remove_error = None
+
+        try:
+            inventory = subprocess.run(
+                [
+                    self.config.docker_binary,
+                    "container",
+                    "ls",
+                    "--all",
+                    "--filter",
+                    f"name={container_name}",
+                    "--format",
+                    "{{.Names}}",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+                check=False,
+                shell=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BrowserRuntimeCleanupError(
+                "Docker inventory could not confirm runtime container cleanup."
+            ) from (remove_error or exc)
+        if inventory.returncode != 0:
+            raise BrowserRuntimeCleanupError(
+                "Docker inventory failed while confirming runtime container cleanup."
+            ) from remove_error
+
+        remaining = {
+            line.strip()
+            for line in (inventory.stdout or "").splitlines()
+            if line.strip()
+        }
+        if container_name in remaining:
+            detail = (
+                f"docker rm exited with {removed.returncode}."
+                if removed is not None and removed.returncode != 0
+                else "container remains in Docker inventory."
+            )
+            raise BrowserRuntimeCleanupError(
+                f"Forced removal was not confirmed for {container_name}: {detail}"
+            ) from remove_error
+        if remove_error is not None:
+            raise BrowserRuntimeCleanupError(
+                f"Docker forced removal failed for {container_name}; "
+                "inventory confirmed the container is absent."
+            ) from remove_error
+        if removed is not None and removed.returncode != 0:
+            raise BrowserRuntimeCleanupError(
+                f"Docker forced removal exited with {removed.returncode} for "
+                f"{container_name}; inventory confirmed the container is absent."
+            )
 
     @staticmethod
     def _network_policy_fingerprint() -> str:
