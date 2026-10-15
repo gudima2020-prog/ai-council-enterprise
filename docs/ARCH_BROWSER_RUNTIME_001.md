@@ -35,9 +35,11 @@ capture_screenshots  = false
 credential_scopes    = ()
 effects              = (browser_read,)
 requested_origins    = ()
+requested_capabilities ⊆ {browser.execute, browser.read}
 ```
 
 Any other profile fails before runtime image execution.
+If `browser.execute` is requested, `browser.read` must also be requested.
 
 ## Exact execution binding
 
@@ -227,6 +229,8 @@ special restrictive ACL that previously caused Docker Desktop
 POSIX staging remains `0o700`.
 
 Cleanup failure is fail-closed.
+Configuration rejects UID 0 or GID 0, including either zero component in a
+numeric `uid:gid` override.
 
 ## Fixture boundary
 
@@ -286,8 +290,29 @@ Attestation remains evidence only. It is not authorization.
 The total mediated run is bounded by
 `BrowserRuntimeRequirements.max_runtime_seconds`.
 
+Host protocol reads are limited to `protocol_line_limit_bytes` raw bytes per
+frame and use a one-item queue. Protocol writes run with the shared execution
+deadline; a blocked pipe causes fail-closed cleanup. The host accepts only
+strict JSON objects: duplicate keys, non-finite numbers and inconsistent
+browser response envelopes are rejected.
+
 Each container has a unique run-derived name. Timeout triggers forced-removal
-attempts for both containers. There is no retry or host execution fallback.
+attempts for both containers. A removal is considered confirmed only after a
+successful Docker inventory reports the exact container name absent. A failed
+remove command or removal exception raises a cleanup error even when inventory
+independently confirms absence. Inventory failure or a still-present container
+also raises a cleanup error. Cleanup tries both containers even if the first
+removal cannot be confirmed. `_execute_mediated()` owns cleanup for processes
+started during mediation; `execute()` adds the failure attestation after that
+cleanup and does not repeat removal for the same run. A successful cleanup
+preserves the original timeout or typed protocol error. There is no retry or
+host execution fallback.
+
+Source-staging cleanup is also fail-closed. If staging removal fails after a
+primary runtime error, the original error type and attestation remain primary;
+the error records `source_staging_cleanup_failed` as a secondary cleanup
+failure. If execution otherwise succeeded, staging-removal failure raises a
+typed cleanup error with a failure attestation instead of returning success.
 
 ## Explicit preparation
 
@@ -301,6 +326,20 @@ attempts for both containers. There is no retry or host execution fallback.
 6. prints both image IDs.
 
 The runtime never auto-builds or auto-pulls.
+
+Security probe V3 verifies cleanup through a successful Docker container
+inventory and exercises oversized unterminated output, short-line floods, and a
+script peer that does not read a large browser response. The nonreader case
+records that the large response stage was reached before accepting timeout and
+cleanup as evidence. The short-line flood source is compiled before execution;
+the probe requires a host-generated `script_message_dispatch /
+unsupported_message_type` marker on the protocol exception, together with its
+failed-run attestation. This distinguishes rejection of the flood's first line
+by the host script-message validator from browser-ready failure, script startup
+failure or another generic protocol error. Non-string RPC `op` values are
+rejected before allowlist membership checks and carry the host-generated
+`script_rpc_validation / invalid_operation_type` marker. Local pipe tests remain
+the evidence for bounded host-side buffering and write deadlines.
 
 ## Security invariants
 

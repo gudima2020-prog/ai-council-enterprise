@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import threading
 import time
 from types import SimpleNamespace
@@ -14,6 +16,7 @@ import pytest
 
 from backend.browser_runtime import (
     BROWSER_SERVER_SCHEMA_VERSION,
+    SCRIPT_RUNNER_SCHEMA_VERSION,
     BrowserDownloadPolicy,
     BrowserEffect,
     BrowserEngine,
@@ -35,6 +38,7 @@ from backend.browser_runtime import (
 )
 from backend.browser_runtime.runtime import (
     BrowserRuntimeBindingError,
+    BrowserRuntimeCleanupError,
     BrowserRuntimeConfig,
     BrowserRuntimeExecutionError,
     BrowserRuntimeImageError,
@@ -43,6 +47,7 @@ from backend.browser_runtime.runtime import (
     BrowserRuntimeService,
     _BoundedLineReader,
     _MediatedTimeout,
+    _strict_json_object,
 )
 
 
@@ -526,10 +531,18 @@ def test_timeout_forces_both_containers_and_returns_attestation(
         "_inspect_trusted_images",
         lambda self: images,
     )
+
+    def timeout_after_cleanup(self, **kwargs):
+        self._force_remove_containers(
+            kwargs["browser_container"],
+            kwargs["script_container"],
+        )
+        raise _MediatedTimeout()
+
     monkeypatch.setattr(
         BrowserRuntimeService,
         "_execute_mediated",
-        lambda self, **kwargs: (_ for _ in ()).throw(_MediatedTimeout()),
+        timeout_after_cleanup,
     )
     monkeypatch.setattr(
         BrowserRuntimeService,
@@ -550,7 +563,185 @@ def test_timeout_forces_both_containers_and_returns_attestation(
     assert attestation is not None
     assert attestation.terminal_result.value == "timeout"
     assert attestation.failure_class == "runtime_timeout"
+    assert len(removed) == 2
     assert len(set(removed)) == 2
+
+
+def test_protocol_stage_and_reason_survive_attestation_wrapping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    images = fake_images()
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: images,
+    )
+    removed: list[str] = []
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_force_remove_container",
+        lambda self, name: removed.append(name),
+    )
+
+    def reject_protocol_after_cleanup(self, **kwargs):
+        self._force_remove_containers(
+            kwargs["browser_container"],
+            kwargs["script_container"],
+        )
+        raise BrowserRuntimeProtocolError(
+            "Unsupported script protocol message.",
+            protocol_stage="script_message_dispatch",
+            protocol_reason="unsupported_message_type",
+        )
+
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_execute_mediated",
+        reject_protocol_after_cleanup,
+    )
+
+    with pytest.raises(BrowserRuntimeProtocolError) as caught:
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=spec(raw_input),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+    assert caught.value.attestation is not None
+    assert caught.value.attestation.failure_class == BrowserRuntimeProtocolError.code
+    assert caught.value.protocol_stage == "script_message_dispatch"
+    assert caught.value.protocol_reason == "unsupported_message_type"
+    assert len(removed) == 2
+    assert len(set(removed)) == 2
+
+
+def test_staging_cleanup_failure_preserves_primary_protocol_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: fake_images(),
+    )
+
+    def reject_protocol(self, **kwargs):
+        raise BrowserRuntimeProtocolError(
+            "Unsupported script protocol message.",
+            protocol_stage="script_message_dispatch",
+            protocol_reason="unsupported_message_type",
+        )
+
+    def fail_staging_cleanup(path):
+        raise PermissionError("simulated staging cleanup failure")
+
+    monkeypatch.setattr(BrowserRuntimeService, "_execute_mediated", reject_protocol)
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.shutil.rmtree",
+        fail_staging_cleanup,
+    )
+
+    with pytest.raises(BrowserRuntimeProtocolError) as caught:
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=spec(raw_input),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+    assert caught.value.attestation is not None
+    assert caught.value.attestation.failure_class == BrowserRuntimeProtocolError.code
+    assert caught.value.protocol_stage == "script_message_dispatch"
+    assert caught.value.protocol_reason == "unsupported_message_type"
+    assert caught.value.cleanup_failures == ("source_staging_cleanup_failed",)
+    assert any("source staging cleanup failed" in note for note in caught.value.__notes__)
+
+
+def test_staging_cleanup_failure_after_success_fails_with_attestation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: fake_images(),
+    )
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_execute_mediated",
+        lambda self, **kwargs: SimpleNamespace(
+            result={"status": "ready"},
+            browser_version="140.0.0.0",
+            automation_runtime_version="1.55.0",
+        ),
+    )
+
+    def fail_staging_cleanup(path):
+        raise PermissionError("simulated staging cleanup failure")
+
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.shutil.rmtree",
+        fail_staging_cleanup,
+    )
+
+    with pytest.raises(BrowserRuntimeCleanupError) as caught:
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=spec(raw_input),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+    assert caught.value.attestation is not None
+    assert caught.value.attestation.terminal_result.value == "failed"
+    assert caught.value.attestation.failure_class == BrowserRuntimeCleanupError.code
+    assert isinstance(caught.value.__cause__, PermissionError)
+
+
+def test_staging_cleanup_failure_preserves_timeout_attestation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: fake_images(),
+    )
+
+    def timeout(self, **kwargs):
+        raise _MediatedTimeout()
+
+    def fail_staging_cleanup(path):
+        raise PermissionError("simulated staging cleanup failure")
+
+    monkeypatch.setattr(BrowserRuntimeService, "_execute_mediated", timeout)
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.shutil.rmtree",
+        fail_staging_cleanup,
+    )
+
+    with pytest.raises(BrowserRuntimeExecutionError) as caught:
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=spec(raw_input),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+    assert caught.value.attestation is not None
+    assert caught.value.attestation.terminal_result.value == "timeout"
+    assert caught.value.attestation.failure_class == "runtime_timeout"
+    assert caught.value.cleanup_failures == ("source_staging_cleanup_failed",)
 
 
 @pytest.mark.parametrize(
@@ -566,6 +757,179 @@ def test_malformed_host_protocol_fails_closed(line: str) -> None:
     service = BrowserRuntimeService()
     with pytest.raises(BrowserRuntimeProtocolError):
         service._read_any_object(reader, deadline=10**12)
+
+
+@pytest.mark.parametrize("op", ({}, [], None, 7, True, 1.5))
+def test_script_rpc_operation_type_is_rejected_with_typed_protocol_error(
+    op: object,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready = json.dumps(
+        {
+            "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
+            "type": "ready",
+            "browser_version": "140",
+            "automation_runtime_version": "1.55.0",
+            "fixture_origin": "http://127.0.0.1:1234",
+        }
+    ) + "\n"
+    request = json.dumps(
+        {
+            "schema_version": SCRIPT_RUNNER_SCHEMA_VERSION,
+            "type": "request",
+            "id": 1,
+            "op": op,
+            "args": {},
+        }
+    ) + "\n"
+
+    class FakeProcess:
+        def __init__(self, *, stdin, stdout) -> None:
+            self.stdin = stdin
+            self.stdout = stdout
+
+        def poll(self):
+            return None
+
+    processes = iter(
+        (
+            FakeProcess(
+                stdin=io.BytesIO(),
+                stdout=io.BytesIO(ready.encode("utf-8")),
+            ),
+            FakeProcess(
+                stdin=io.BytesIO(),
+                stdout=io.BytesIO(request.encode("utf-8")),
+            ),
+        )
+    )
+    removed: list[str] = []
+    service = BrowserRuntimeService()
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: fake_images(),
+    )
+    monkeypatch.setattr(service, "_start_process", lambda command: next(processes))
+    monkeypatch.setattr(
+        service,
+        "_force_remove_containers",
+        lambda *names: removed.extend(names),
+    )
+
+    raw_input = {"query": "malformed-op"}
+    with pytest.raises(BrowserRuntimeProtocolError) as caught:
+        service.execute(
+            artifact=artifact(),
+            spec=spec(raw_input),
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+    assert caught.value.attestation is not None
+    assert caught.value.attestation.failure_class == BrowserRuntimeProtocolError.code
+    assert caught.value.protocol_stage == "script_rpc_validation"
+    assert caught.value.protocol_reason == "invalid_operation_type"
+    assert any(name.startswith("ai-council-browser-browser-run-") for name in removed)
+    assert any(name.startswith("ai-council-script-browser-run-") for name in removed)
+
+
+@pytest.mark.parametrize(
+    "line",
+    (
+        '{"x":1,"x":2}\n',
+        '{"x":NaN}\n',
+        '{"x":Infinity}\n',
+        '{"x":-Infinity}\n',
+        '{"x":1e999}\n',
+    ),
+)
+def test_strict_protocol_json_rejects_ambiguous_or_nonfinite_values(
+    line: str,
+) -> None:
+    reader = _BoundedLineReader(io.BytesIO(line.encode()), limit_bytes=4096)
+    with pytest.raises(BrowserRuntimeProtocolError):
+        BrowserRuntimeService()._read_any_object(reader, deadline=10**12)
+
+
+@pytest.mark.parametrize(
+    "response",
+    (
+        {
+            "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
+            "type": "response",
+            "id": True,
+            "ok": True,
+            "result": "x",
+        },
+        {
+            "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
+            "type": "response",
+            "id": 1,
+            "ok": True,
+            "error_code": "unexpected",
+        },
+        {
+            "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
+            "type": "response",
+            "id": 1,
+            "ok": False,
+            "result": "unexpected",
+        },
+        {
+            "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
+            "type": "response",
+            "id": 1,
+            "ok": False,
+            "error_code": 123,
+        },
+    ),
+)
+def test_browser_response_requires_exact_id_and_consistent_result_shape(
+    response: dict[str, object],
+) -> None:
+    with pytest.raises(BrowserRuntimeProtocolError):
+        BrowserRuntimeService()._validate_browser_response(response, 1)
+
+
+@pytest.mark.parametrize(
+    "response",
+    (
+        {
+            "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
+            "type": "response",
+            "id": 1,
+            "ok": True,
+            "result": "body text",
+        },
+        {
+            "schema_version": BROWSER_SERVER_SCHEMA_VERSION,
+            "type": "response",
+            "id": 1,
+            "ok": False,
+            "error_code": "operation.denied",
+        },
+    ),
+)
+def test_browser_response_accepts_consistent_success_and_error_shapes(
+    response: dict[str, object],
+) -> None:
+    BrowserRuntimeService()._validate_browser_response(response, 1)
+
+
+def test_strict_protocol_json_accepts_valid_error_envelope() -> None:
+    assert _strict_json_object(
+        '{"schema_version":"v1","type":"response","id":1,'
+        '"ok":false,"error_code":"operation.denied"}'
+    ) == {
+        "schema_version": "v1",
+        "type": "response",
+        "id": 1,
+        "ok": False,
+        "error_code": "operation.denied",
+    }
 
 
 def test_bounded_line_reader_rejects_unterminated_overrun_with_bounded_read() -> None:
@@ -829,6 +1193,30 @@ def test_security_probe_cleanup_query_fails_closed_on_docker_error(
         module._container_absent("ai-council-browser-test")
 
 
+def test_security_probe_short_line_flood_payload_compiles() -> None:
+    module = _load_security_probe_module()
+    source = module._build_protocol_flood_source("b'{}\\n' * 10000")
+    compile(source.decode("utf-8"), "<short-line-flood>", "exec")
+    assert b"data = b'{}\\n' * 10000\n" in source
+
+
+def test_short_line_flood_requires_host_dispatch_rejection_marker() -> None:
+    module = _load_security_probe_module()
+    early_error = BrowserRuntimeProtocolError(
+        "Browser server ready envelope is invalid."
+    )
+    host_rejection = BrowserRuntimeProtocolError(
+        "Unsupported script protocol message.",
+        attestation=SimpleNamespace(
+            failure_class=BrowserRuntimeProtocolError.code,
+        ),
+        protocol_stage="script_message_dispatch",
+        protocol_reason="unsupported_message_type",
+    )
+    assert not module._is_short_line_flood_host_rejection(early_error)
+    assert module._is_short_line_flood_host_rejection(host_rejection)
+
+
 def test_security_probe_cleanup_query_uses_exact_container_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -955,7 +1343,192 @@ def test_runtime_config_validation() -> None:
         BrowserRuntimeConfig(script_cpu_limit=0)
     with pytest.raises(ValueError):
         BrowserRuntimeConfig(user="root")
+    for user in ("0:0", "0:65534", "65534:0", "00:1"):
+        with pytest.raises(ValueError, match="non-root"):
+            BrowserRuntimeConfig(user=user)
     with pytest.raises(ValueError):
         BrowserRuntimeConfig(output_limit_bytes=10)
     with pytest.raises(ValueError):
         BrowserRuntimeConfig(max_rpc_requests=0)
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        ("docker.admin",),
+        ("shell.execute",),
+        ("network.external",),
+        ("browser.execute",),
+    ],
+)
+def test_profile_rejects_capabilities_outside_read_only_profile(
+    capabilities: tuple[str, ...],
+) -> None:
+    raw_input = {"query": "fixture"}
+    candidate = replace(
+        spec(raw_input),
+        requested_capabilities=capabilities,
+    )
+    with pytest.raises(BrowserRuntimeProfileError):
+        BrowserRuntimeService._validate_profile(candidate)
+
+
+def test_unknown_requested_capability_fails_before_image_inspection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_input = {"query": "fixture"}
+    candidate = replace(
+        spec(raw_input),
+        requested_capabilities=("docker.admin",),
+    )
+    monkeypatch.setattr(
+        BrowserRuntimeService,
+        "_inspect_trusted_images",
+        lambda self: (_ for _ in ()).throw(
+            AssertionError("Images must not be inspected.")
+        ),
+    )
+    with pytest.raises(BrowserRuntimeProfileError):
+        BrowserRuntimeService().execute(
+            artifact=artifact(),
+            spec=candidate,
+            source_bytes=SOURCE,
+            raw_input=raw_input,
+            fixture_root=fixture_root(tmp_path),
+        )
+
+
+def test_profile_accepts_only_read_profile_capability_set() -> None:
+    raw_input = {"query": "fixture"}
+    BrowserRuntimeService._validate_profile(spec(raw_input))
+    read_only = replace(
+        spec(raw_input),
+        requested_capabilities=("browser.read",),
+    )
+    BrowserRuntimeService._validate_profile(read_only)
+
+
+def test_force_remove_requires_confirmed_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = BrowserRuntimeService()
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        del kwargs
+        command = list(command)
+        calls.append(command)
+        if command[1:3] == ["rm", "--force"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="not found")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.subprocess.run",
+        fake_run,
+    )
+    with pytest.raises(BrowserRuntimeCleanupError, match="exited with 1"):
+        service._force_remove_container("ai-council-browser-missing")
+    assert len(calls) == 2
+    assert calls[0][1:3] == ["rm", "--force"]
+    assert calls[1][1:4] == ["container", "ls", "--all"]
+
+
+@pytest.mark.parametrize("failure_kind", ("oserror", "timeout"))
+def test_force_remove_error_fails_even_if_inventory_confirms_absence(
+    failure_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = BrowserRuntimeService()
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        del kwargs
+        command = list(command)
+        calls.append(command)
+        if command[1:3] == ["rm", "--force"]:
+            if failure_kind == "oserror":
+                raise OSError("docker rm failed")
+            raise subprocess.TimeoutExpired(command, timeout=15)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.subprocess.run",
+        fake_run,
+    )
+    with pytest.raises(BrowserRuntimeCleanupError, match="inventory confirmed"):
+        service._force_remove_container("ai-council-browser-absent")
+    assert len(calls) == 2
+    assert calls[0][1:3] == ["rm", "--force"]
+    assert calls[1][1:3] == ["container", "ls"]
+
+
+def test_force_remove_fails_if_container_remains_or_inventory_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = BrowserRuntimeService()
+    responses = iter(
+        (
+            SimpleNamespace(returncode=1, stdout="", stderr="rm failed"),
+            SimpleNamespace(
+                returncode=0,
+                stdout="ai-council-browser-still-present\n",
+                stderr="",
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.subprocess.run",
+        lambda *args, **kwargs: next(responses),
+    )
+    with pytest.raises(BrowserRuntimeCleanupError):
+        service._force_remove_container("ai-council-browser-still-present")
+
+    responses = iter(
+        (
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+            SimpleNamespace(
+                returncode=125,
+                stdout="",
+                stderr="Cannot connect to Docker daemon",
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.subprocess.run",
+        lambda *args, **kwargs: next(responses),
+    )
+    with pytest.raises(BrowserRuntimeCleanupError, match="inventory failed"):
+        service._force_remove_container("ai-council-browser-unknown")
+
+
+def test_force_remove_attempts_both_containers_when_first_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = BrowserRuntimeService()
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        del kwargs
+        command = list(command)
+        calls.append(command)
+        if command[1:3] == ["rm", "--force"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="rm failed")
+        if any("first" in item for item in command):
+            return SimpleNamespace(
+                returncode=0,
+                stdout="ai-council-browser-first\n",
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "backend.browser_runtime.runtime.subprocess.run",
+        fake_run,
+    )
+    with pytest.raises(BrowserRuntimeCleanupError):
+        service._force_remove_containers(
+            "ai-council-browser-first",
+            "ai-council-script-second",
+        )
+    assert sum(command[1:3] == ["rm", "--force"] for command in calls) == 2
